@@ -1003,6 +1003,10 @@ bool CServerGameDLL::LevelInit( const char *pMapName, char const *pMapEntities, 
 	luasrc_LoadEntities();
 	//luasrc_LoadEffects();
 
+	// Now that mounted-addon SWEPs/SENTs are registered, (re)build the spawn-menu
+	// tabs so each appears under its own SWEP.Category / ENT.Category.
+	WriteAddonSpawnlists();
+
 	//Andrew; loadup base gamemode.
 	luasrc_LoadGamemode( LUA_BASE_GAMEMODE );
 

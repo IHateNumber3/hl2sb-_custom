@@ -1158,7 +1158,9 @@ int CAI_PlayerAlly::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 	// Don't do damage reduction for DMG_GENERIC. This allows SetHealth inputs to still do full damage.
 	if ( subInfo.GetDamageType() != DMG_GENERIC )
 	{
-		if ( Classify() == CLASS_PLAYER_ALLY_VITAL && !(subInfo.GetDamageType() & DMG_CRUSH) )
+		// DMG_DISSOLVE is an instant-kill (combine-ball / dissolver style); never cap it,
+		// otherwise vital allies survive a disintegration that should be lethal.
+		if ( Classify() == CLASS_PLAYER_ALLY_VITAL && !(subInfo.GetDamageType() & (DMG_CRUSH|DMG_DISSOLVE)) )
 		{
 			float flDamage = subInfo.GetDamage();
 			if ( flDamage > ( GetMaxHealth() * 0.25 ) )

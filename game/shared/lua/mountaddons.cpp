@@ -14,22 +14,20 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-// Weapon classes discovered in mounted addons this session. The HL2:SB++ spawn
-// menu is built entirely from settings/spawnlists/*.kv manifest files and never
-// enumerates registered SWEPs, so a mounted addon's weapon would load but never
-// appear. We collect the classes here and emit a generated spawnlist tab.
+// Weapon and entity classes discovered in mounted addons this session. The
+// HL2:SB++ spawn menu is built entirely from settings/spawnlists/*.kv manifest
+// files and never enumerates registered SWEPs/SENTs, so a mounted addon's
+// content would load but never appear in the menu. We collect the classes here
+// and, once Lua has registered them, emit generated spawnlist tabs that mirror
+// each class's own SWEP.Category / ENT.Category (like GMod does) instead of
+// dumping everything under a single "addons" tab.
 static CUtlVector<CUtlString> g_AddonWeaponClasses;
+static CUtlVector<CUtlString> g_AddonEntityClasses;
 
-static void CollectAddonWeaponClass( const char *fileRelName )
+static void CollectClassInto( CUtlVector<CUtlString> &vec, const char *rest )
 {
-	// fileRelName is a GMA-relative path like "lua/weapons/weapon_x.lua" or
-	// "lua/weapons/weapon_x/shared.lua". Extract the class (weapon_x).
-	static const char *kPrefix = "lua/weapons/";
-	const int		   prefixLen = 12; // strlen("lua/weapons/")
-	if ( Q_strnicmp( fileRelName, kPrefix, prefixLen ) != 0 )
-		return;
-
-	const char *rest = fileRelName + prefixLen;
+	// rest points just past the "lua/weapons/" or "lua/entities/" prefix, e.g.
+	// "weapon_x.lua" or "weapon_x/shared.lua". Extract the class (weapon_x).
 	if ( rest[0] == '\0' )
 		return;
 
@@ -41,77 +39,250 @@ static void CollectAddonWeaponClass( const char *fileRelName )
 	if ( cls[0] == '\0' )
 		return;
 
-	FOR_EACH_VEC( g_AddonWeaponClasses, k )
+	FOR_EACH_VEC( vec, k )
 	{
-		if ( Q_stricmp( g_AddonWeaponClasses[k].Get(), cls ) == 0 )
-			return; // already have it (folder SWEP has several files)
+		if ( Q_stricmp( vec[k].Get(), cls ) == 0 )
+			return; // already have it (folder SWEP/SENT has several files)
 	}
-	g_AddonWeaponClasses.AddToTail( CUtlString( cls ) );
+	vec.AddToTail( CUtlString( cls ) );
 }
 
-// Emit settings/spawnlists/zz_addons.kv listing every mounted addon weapon so
-// the spawn menu shows them in an "Addons" tab. Uses ent_create (FCVAR_GAMEDLL,
-// no sv_cheats needed) so clicking an entry spawns the weapon to pick up.
-static void WriteAddonSpawnlist()
+static void CollectAddonFileClass( const char *fileRelName )
 {
-	const char *kPath = "settings/spawnlists/zz_addons.kv";
+	// fileRelName is a GMA-relative path like "lua/weapons/weapon_x/shared.lua"
+	// or "lua/entities/sent_x.lua".
+	if ( Q_strnicmp( fileRelName, "lua/weapons/", 12 ) == 0 )
+		CollectClassInto( g_AddonWeaponClasses, fileRelName + 12 );
+	else if ( Q_strnicmp( fileRelName, "lua/entities/", 13 ) == 0 )
+		CollectClassInto( g_AddonEntityClasses, fileRelName + 13 );
+}
 
-	if ( g_AddonWeaponClasses.Count() == 0 )
+// Push registry.get(cls) (registry is "weapon" or "entity") onto the Lua stack.
+// Returns true with the class table left on the stack, false with the stack
+// balanced.
+static bool PushAddonClassTable( const char *registry, const char *cls )
+{
+	if ( !L )
+		return false;
+
+	lua_getglobal( L, registry );
+	if ( !lua_istable( L, -1 ) )
 	{
-		// Nothing to list; remove any stale generated file.
-		if ( filesystem->FileExists( kPath, "MOD" ) )
-			filesystem->RemoveFile( kPath, "MOD" );
+		lua_pop( L, 1 );
+		return false;
+	}
+	lua_getfield( L, -1, "get" );
+	if ( !lua_isfunction( L, -1 ) )
+	{
+		lua_pop( L, 2 );
+		return false;
+	}
+	lua_remove( L, -2 ); // drop the registry table, keep the get() function
+	lua_pushstring( L, cls );
+	if ( luasrc_pcall( L, 1, 1, 0 ) != 0 )
+	{
+		lua_pop( L, 1 ); // error object
+		return false;
+	}
+	if ( !lua_istable( L, -1 ) )
+	{
+		lua_pop( L, 1 );
+		return false;
+	}
+	return true; // class table left on stack
+}
+
+static void ReadTableString( int tableIdx, const char *field, const char *def, char *out, int outLen )
+{
+	lua_getfield( L, tableIdx, field );
+	const char *s = lua_isstring( L, -1 ) ? lua_tostring( L, -1 ) : NULL;
+	Q_strncpy( out, ( s && s[0] ) ? s : def, outLen );
+	lua_pop( L, 1 );
+}
+
+// One spawnable item in the menu.
+struct AddonSpawnItem
+{
+	CUtlString cls;
+	CUtlString printName;
+};
+
+// One category -> the items declared under it.
+struct AddonSpawnCategory
+{
+	CUtlString				  name;
+	CUtlVector<AddonSpawnItem> items;
+};
+
+static AddonSpawnCategory *FindOrAddCategory( CUtlVector<AddonSpawnCategory> &cats, const char *name )
+{
+	FOR_EACH_VEC( cats, i )
+	{
+		if ( Q_stricmp( cats[i].name.Get(), name ) == 0 )
+			return &cats[i];
+	}
+	int idx = cats.AddToTail();
+	cats[idx].name = name;
+	return &cats[idx];
+}
+
+// Turn a category name into a safe, unique-ish filename component.
+static void SanitizeForFilename( const char *in, char *out, int outLen )
+{
+	int j = 0;
+	for ( int i = 0; in[i] && j < outLen - 1; i++ )
+	{
+		char c = in[i];
+		if ( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) )
+			out[j++] = ( c >= 'A' && c <= 'Z' ) ? ( c - 'A' + 'a' ) : c;
+		else if ( c == ' ' || c == '-' || c == '_' )
+			out[j++] = '_';
+	}
+	out[j] = '\0';
+	if ( j == 0 )
+		Q_strncpy( out, "other", outLen );
+}
+
+// Resolve the spawn-icon material path for a class, GMod-preference order:
+//  1. materials/vgui/entities/<class>.vmt  (VGUI material - pass without the
+//     "materials/" prefix but WITH extension)
+//  2. materials/entities/<class>.png       (loaded as a PNG file)
+//  3. a stock fallback icon
+static void ResolveClassIcon( const char *cls, char *icon, int iconLen )
+{
+	char probe[MAX_PATH];
+	Q_snprintf( probe, sizeof( probe ), "materials/vgui/entities/%s.vmt", cls );
+	if ( filesystem->FileExists( probe, "GAME" ) )
+	{
+		Q_snprintf( icon, iconLen, "vgui/entities/%s.vmt", cls );
 		return;
+	}
+	Q_snprintf( icon, iconLen, "materials/entities/%s.png", cls );
+	if ( !filesystem->FileExists( icon, "GAME" ) )
+		Q_strncpy( icon, "materials/entities/weapon_crowbar.png", iconLen );
+}
+
+// Remove any spawnlist file this system generated on a previous mount so stale
+// categories don't linger after addons change.
+static void RemoveGeneratedSpawnlists()
+{
+	// Legacy single-tab file from older builds.
+	if ( filesystem->FileExists( "settings/spawnlists/zz_addons.kv", "MOD" ) )
+		filesystem->RemoveFile( "settings/spawnlists/zz_addons.kv", "MOD" );
+
+	FileFindHandle_t fh;
+	const char		*fn = g_pFullFileSystem->FindFirstEx( "settings/spawnlists/zz_addon_*.kv", "MOD", &fh );
+	while ( fn )
+	{
+		char path[MAX_PATH];
+		Q_snprintf( path, sizeof( path ), "settings/spawnlists/%s", fn );
+		filesystem->RemoveFile( path, "MOD" );
+		fn = g_pFullFileSystem->FindNext( fh );
+	}
+	g_pFullFileSystem->FindClose( fh );
+}
+
+// Emit one settings/spawnlists/zz_addon_<category>.kv per category, so mounted
+// addon SWEPs/SENTs appear in the spawn menu under their own declared category
+// (SWEP.Category / ENT.Category), exactly like GMod - not forced under an
+// "addons" tab. Clicking an entry runs ent_create <class> (FCVAR_GAMEDLL, no
+// sv_cheats needed) which spawns the registered scripted weapon/entity/NPC.
+void WriteAddonSpawnlists()
+{
+	RemoveGeneratedSpawnlists();
+
+	if ( g_AddonWeaponClasses.Count() == 0 && g_AddonEntityClasses.Count() == 0 )
+		return;
+
+	CUtlVector<AddonSpawnCategory> cats;
+
+	// Weapons -> SWEP.Category (GMod defaults this to "Other").
+	FOR_EACH_VEC( g_AddonWeaponClasses, k )
+	{
+		const char *cls = g_AddonWeaponClasses[k].Get();
+		char		category[128];
+		char		printName[128];
+		Q_strncpy( category, "Other", sizeof( category ) );
+		Q_strncpy( printName, cls, sizeof( printName ) );
+		if ( PushAddonClassTable( "weapon", cls ) )
+		{
+			ReadTableString( -1, "Category", "Other", category, sizeof( category ) );
+			ReadTableString( -1, "PrintName", cls, printName, sizeof( printName ) );
+			lua_pop( L, 1 );
+		}
+
+		AddonSpawnCategory *pCat = FindOrAddCategory( cats, category );
+		int					ii = pCat->items.AddToTail();
+		pCat->items[ii].cls = cls;
+		pCat->items[ii].printName = printName;
+	}
+
+	// Entities / NPCs -> ENT.Category (GMod defaults this to "Other").
+	FOR_EACH_VEC( g_AddonEntityClasses, k )
+	{
+		const char *cls = g_AddonEntityClasses[k].Get();
+		char		category[128];
+		char		printName[128];
+		Q_strncpy( category, "Other", sizeof( category ) );
+		Q_strncpy( printName, cls, sizeof( printName ) );
+		if ( PushAddonClassTable( "entity", cls ) )
+		{
+			ReadTableString( -1, "Category", "Other", category, sizeof( category ) );
+			ReadTableString( -1, "PrintName", cls, printName, sizeof( printName ) );
+			lua_pop( L, 1 );
+		}
+
+		AddonSpawnCategory *pCat = FindOrAddCategory( cats, category );
+		int					ii = pCat->items.AddToTail();
+		pCat->items[ii].cls = cls;
+		pCat->items[ii].printName = printName;
 	}
 
 	filesystem->CreateDirHierarchy( "settings/spawnlists", "MOD" );
 
-	FileHandle_t fh = g_pFullFileSystem->Open( kPath, "wt", "MOD" );
-	if ( fh == FILESYSTEM_INVALID_HANDLE )
+	int nWritten = 0;
+	FOR_EACH_VEC( cats, c )
 	{
-		Warning( "Failed to write generated addon spawnlist: %s\n", kPath );
-		return;
-	}
+		AddonSpawnCategory &cat = cats[c];
 
-	g_pFullFileSystem->FPrintf( fh, "\"Addons\"\n{\n" );
-	g_pFullFileSystem->FPrintf( fh, "\t\"page_icon\" \"materials/icon16/bricks.png\"\n" );
-	g_pFullFileSystem->FPrintf( fh, "\t\"header\"\n\t{\n\t\t\"text\" \"Mounted Addon Weapons\"\n\t}\n" );
+		char safe[128];
+		SanitizeForFilename( cat.name.Get(), safe, sizeof( safe ) );
 
-	FOR_EACH_VEC( g_AddonWeaponClasses, k )
-	{
-		const char *cls = g_AddonWeaponClasses[k].Get();
+		char kPath[MAX_PATH];
+		Q_snprintf( kPath, sizeof( kPath ), "settings/spawnlists/zz_addon_%s.kv", safe );
 
-		// Icon lookup, in GMod-preference order:
-		//  1. materials/vgui/entities/<class>.vmt  (the standard SWEP spawn
-		//     icon; the menu loads .vmt/.vtf as a VGUI material - pass the
-		//     material-relative path WITH extension, no "materials/" prefix)
-		//  2. materials/entities/<class>.png       (loaded as a PNG file)
-		//  3. a stock fallback icon
-		char icon[MAX_PATH];
-		char probe[MAX_PATH];
-		Q_snprintf( probe, sizeof( probe ), "materials/vgui/entities/%s.vmt", cls );
-		if ( filesystem->FileExists( probe, "GAME" ) )
+		FileHandle_t fh = g_pFullFileSystem->Open( kPath, "wt", "MOD" );
+		if ( fh == FILESYSTEM_INVALID_HANDLE )
 		{
-			Q_snprintf( icon, sizeof( icon ), "vgui/entities/%s.vmt", cls );
-		}
-		else
-		{
-			Q_snprintf( icon, sizeof( icon ), "materials/entities/%s.png", cls );
-			if ( !filesystem->FileExists( icon, "GAME" ) )
-				Q_strncpy( icon, "materials/entities/weapon_crowbar.png", sizeof( icon ) );
+			Warning( "Failed to write generated addon spawnlist: %s\n", kPath );
+			continue;
 		}
 
-		g_pFullFileSystem->FPrintf( fh, "\t\"image_button\"\n\t{\n" );
-		g_pFullFileSystem->FPrintf( fh, "\t\t\"name\" \"%s\"\n", cls );
-		g_pFullFileSystem->FPrintf( fh, "\t\t\"image\" \"%s\"\n", icon );
-		g_pFullFileSystem->FPrintf( fh, "\t\t\"command\" \"ent_create %s\"\n", cls );
-		g_pFullFileSystem->FPrintf( fh, "\t}\n" );
+		// Tab name == the category itself, so the menu shows a natural tab.
+		g_pFullFileSystem->FPrintf( fh, "\"%s\"\n{\n", cat.name.Get() );
+		g_pFullFileSystem->FPrintf( fh, "\t\"page_icon\" \"materials/icon16/bricks.png\"\n" );
+
+		FOR_EACH_VEC( cat.items, ii )
+		{
+			const AddonSpawnItem &item = cat.items[ii];
+
+			char icon[MAX_PATH];
+			ResolveClassIcon( item.cls.Get(), icon, sizeof( icon ) );
+
+			g_pFullFileSystem->FPrintf( fh, "\t\"image_button\"\n\t{\n" );
+			g_pFullFileSystem->FPrintf( fh, "\t\t\"name\" \"%s\"\n", item.printName.Get() );
+			g_pFullFileSystem->FPrintf( fh, "\t\t\"image\" \"%s\"\n", icon );
+			g_pFullFileSystem->FPrintf( fh, "\t\t\"command\" \"ent_create %s\"\n", item.cls.Get() );
+			g_pFullFileSystem->FPrintf( fh, "\t}\n" );
+		}
+
+		g_pFullFileSystem->FPrintf( fh, "}\n" );
+		g_pFullFileSystem->Close( fh );
+		nWritten++;
 	}
 
-	g_pFullFileSystem->FPrintf( fh, "}\n" );
-	g_pFullFileSystem->Close( fh );
-
-	DevMsg( "Wrote generated addon spawnlist with %d weapon(s): %s\n", g_AddonWeaponClasses.Count(), kPath );
+	DevMsg( "Wrote %d generated addon spawnlist tab(s) for %d weapon(s), %d entity(ies).\n",
+			nWritten, g_AddonWeaponClasses.Count(), g_AddonEntityClasses.Count() );
 }
 
 static void ExtractZIP( const char *zipPath, const char *cacheBase, const char *gamePath )
@@ -472,9 +643,10 @@ static void ExtractGMA( const char *gmaPath, const char *cacheBase, const char *
 
 	DevMsg( "Mounted GMA addon: %s -> %s (%d files)\n", gmaPath, absOutBase, entries.Count() );
 
-	// Record any SWEPs so they can be surfaced in the spawn menu.
+	// Record any SWEPs/SENTs so they can be surfaced in the spawn menu once Lua
+	// has registered them (see WriteAddonSpawnlists).
 	FOR_EACH_VEC( entries, wi )
-		CollectAddonWeaponClass( entries[wi].name );
+		CollectAddonFileClass( entries[wi].name );
 }
 
 static void MountAddonFolder( const char *folder, const char *gamePath )
@@ -545,13 +717,16 @@ void MountAddons()
 	filesystem->AddSearchPath( LUA_PATH_CACHE, "GAME", PATH_ADD_TO_HEAD );
 
 	g_AddonWeaponClasses.RemoveAll();
+	g_AddonEntityClasses.RemoveAll();
 
 	MountAddonFolder( "addons", gamePath );
 	MountAddonFolder( "custom", gamePath );
 	MountAddonFolder( "mods", gamePath );
 
-	// Surface any addon SWEPs we found in a generated spawn-menu tab.
-	WriteAddonSpawnlist();
+	// NOTE: the spawn-menu tabs are written later, from WriteAddonSpawnlists(),
+	// once luasrc_LoadWeapons()/LoadEntities() have registered the classes so we
+	// can read each one's real SWEP.Category / ENT.Category. At mount time the
+	// Lua registries don't exist yet.
 }
 
 extern void lcf_recursivedeletefile( const char *current );
