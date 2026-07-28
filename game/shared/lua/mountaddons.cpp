@@ -217,20 +217,34 @@ void WriteAddonSpawnlists()
 		pCat->items[ii].printName = printName;
 	}
 
-	// Entities / NPCs -> ENT.Category (GMod defaults this to "Other").
+	// Entities / NPCs. AI SENTs (ENT.Type == "ai", the usual form for a
+	// Workshop NPC's lua/entities/npc_x/ folder) default into a "NPCs" tab;
+	// everything else defaults to "Other". An explicit ENT.Category always wins.
 	FOR_EACH_VEC( g_AddonEntityClasses, k )
 	{
 		const char *cls = g_AddonEntityClasses[k].Get();
 		char		category[128];
 		char		printName[128];
-		Q_strncpy( category, "Other", sizeof( category ) );
+		char		entType[64];
 		Q_strncpy( printName, cls, sizeof( printName ) );
+		Q_strncpy( entType, "anim", sizeof( entType ) );
+		bool		haveExplicitCategory = false;
+		category[0] = '\0';
 		if ( PushAddonClassTable( "entity", cls ) )
 		{
-			ReadTableString( -1, "Category", "Other", category, sizeof( category ) );
+			ReadTableString( -1, "Type", "anim", entType, sizeof( entType ) );
 			ReadTableString( -1, "PrintName", cls, printName, sizeof( printName ) );
-			lua_pop( L, 1 );
+			lua_getfield( L, -1, "Category" );
+			if ( lua_isstring( L, -1 ) )
+			{
+				Q_strncpy( category, lua_tostring( L, -1 ), sizeof( category ) );
+				haveExplicitCategory = category[0] != '\0';
+			}
+			lua_pop( L, 1 ); // Category
+			lua_pop( L, 1 ); // class table
 		}
+		if ( !haveExplicitCategory )
+			Q_strncpy( category, Q_stricmp( entType, "ai" ) == 0 ? "NPCs" : "Other", sizeof( category ) );
 
 		AddonSpawnCategory *pCat = FindOrAddCategory( cats, category );
 		int					ii = pCat->items.AddToTail();

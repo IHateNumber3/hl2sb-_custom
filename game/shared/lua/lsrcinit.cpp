@@ -783,6 +783,423 @@ if CLIENT then
   end
   if Derma_DrawBackgroundBlur == nil then function Derma_DrawBackgroundBlur() end end
 end
+
+-- ===================================================================
+-- GMod library layer (batch 2). Everything is gated on the name being
+-- absent so engine natives / base content always win. Backed by real
+-- engine natives (filesystem, weapon/entity registries, surface) where
+-- they exist; pure Lua where self-contained.
+-- ===================================================================
+
+-- AccessorFunc: generate Get<Name>/Set<Name> on a table. Ubiquitous in
+-- ENT/SWEP/tool definitions; its absence crashed addons at file scope.
+if AccessorFunc == nil then
+  function AccessorFunc( tab, key, name, force )
+    if tab == nil then return end
+    tab[ "Get" .. name ] = function( self ) return self[ key ] end
+    tab[ "Set" .. name ] = function( self, v )
+      if force == 1 then v = tonumber( v ) or 0
+      elseif force == 2 then v = tobool( v )
+      elseif force == 3 then v = tostring( v ) end
+      self[ key ] = v
+    end
+  end
+end
+
+-- list: a global registry keyed by list name. GMod addons register
+-- NPCs / weapons / tools / etc. via list.Set and menus read them back.
+if list == nil then
+  local lists = {}
+  list = {}
+  function list.GetForEdit( name ) local t = lists[ name ] if t == nil then t = {} lists[ name ] = t end return t end
+  function list.GetTable( name ) return lists[ name ] or {} end
+  function list.Get( name ) return table.Copy( lists[ name ] or {} ) end
+  function list.Set( name, key, val ) list.GetForEdit( name )[ key ] = val end
+  function list.Add( name, val ) local t = list.GetForEdit( name ) t[ #t + 1 ] = val end
+  function list.HasEntry( name, key ) local t = lists[ name ] return t ~= nil and t[ key ] ~= nil end
+end
+
+-- baseclass + DEFINE_BASECLASS: resolve a base SWEP/ENT table by name,
+-- backed by the engine's weapon.get / entity.get registries.
+if baseclass == nil then
+  local cache = {}
+  baseclass = {}
+  function baseclass.Set( name, tab ) cache[ name ] = tab end
+  function baseclass.Get( name )
+    if cache[ name ] then return cache[ name ] end
+    local t
+    if weapon and weapon.get then t = weapon.get( name ) end
+    if t == nil and entity and entity.get then t = entity.get( name ) end
+    if t == nil then t = {} end
+    cache[ name ] = t
+    return t
+  end
+end
+if DEFINE_BASECLASS == nil then function DEFINE_BASECLASS( name ) return baseclass.Get( name ) end end
+
+-- weapons / scripted_ents: some addons register directly instead of
+-- relying on the SWEP/ENT auto-loader. Delegate to the engine registries.
+if weapons == nil and weapon ~= nil then
+  weapons = {}
+  function weapons.Register( t, class ) if weapon.register then weapon.register( t, class ) end if baseclass then baseclass.Set( class, t ) end return t end
+  function weapons.GetStored( class ) return weapon.get and weapon.get( class ) or nil end
+  function weapons.Get( class ) local t = weapons.GetStored( class ) return t and table.Copy( t ) or nil end
+  function weapons.GetList() return {} end
+  function weapons.IsBasedOn() return false end
+end
+if scripted_ents == nil and entity ~= nil then
+  scripted_ents = {}
+  function scripted_ents.Register( t, class ) if entity.register then entity.register( t, class ) end if baseclass then baseclass.Set( class, t ) end return t end
+  function scripted_ents.GetStored( class ) return entity.get and entity.get( class ) or nil end
+  function scripted_ents.Get( class ) local t = scripted_ents.GetStored( class ) return t and table.Copy( t ) or nil end
+  function scripted_ents.GetList() return {} end
+  function scripted_ents.GetType() return "anim" end
+  function scripted_ents.IsBasedOn() return false end
+end
+
+-- string path helper used by the file library and many addons.
+string.GetPathFromFilename = string.GetPathFromFilename or function( p )
+  p = string.gsub( p, "\\", "/" )
+  return string.match( p, "^(.*/)[^/]*$" ) or ""
+end
+
+-- file library, backed by the native filesystem lib. GMod's default path
+-- is "DATA" (garrysmod/data); mirror that as data/<name> under "MOD".
+if file == nil and filesystem ~= nil then
+  file = {}
+  local function resolve( name, path )
+    if path == nil or path == "DATA" then return "data/" .. name, "MOD" end
+    return name, path
+  end
+  function file.Exists( name, path ) local r, p = resolve( name, path ) return filesystem.FileExists( r, p ) end
+  function file.IsDir( name, path ) local r, p = resolve( name, path ) return filesystem.IsDirectory( r, p ) end
+  function file.Size( name, path ) local r, p = resolve( name, path ) return filesystem.Size( r, p ) end
+  function file.Delete( name ) filesystem.RemoveFile( "data/" .. name, "MOD" ) end
+  function file.CreateDir( name ) filesystem.CreateDirHierarchy( "data/" .. name, "MOD" ) end
+  function file.Read( name, path )
+    local r, p = resolve( name, path )
+    local sz = filesystem.Size( r, p )
+    if not sz or sz < 0 then return nil end
+    local f = filesystem.Open( r, "rb", p )
+    if not f then return nil end
+    local _, data = filesystem.Read( sz, f )
+    filesystem.Close( f )
+    return data
+  end
+  function file.Write( name, content )
+    local dir = string.GetPathFromFilename( "data/" .. name )
+    if dir ~= "" then filesystem.CreateDirHierarchy( dir, "MOD" ) end
+    local f = filesystem.Open( "data/" .. name, "wb", "MOD" )
+    if not f then return false end
+    filesystem.Write( content, f )
+    filesystem.Close( f )
+    return true
+  end
+  function file.Append( name, content )
+    local f = filesystem.Open( "data/" .. name, "ab", "MOD" )
+    if not f then return false end
+    filesystem.Write( content, f )
+    filesystem.Close( f )
+    return true
+  end
+  function file.Find( pattern, path )
+    local r, p = resolve( pattern, path )
+    local all = filesystem.Find( r, p ) or {}
+    local base = string.GetPathFromFilename( r )
+    local files, dirs = {}, {}
+    for _, n in ipairs( all ) do
+      if filesystem.IsDirectory( base .. n, p ) then dirs[ #dirs + 1 ] = n else files[ #files + 1 ] = n end
+    end
+    return files, dirs
+  end
+  function file.Time() return 0 end
+end
+
+-- util JSON + table helpers (pure Lua). Config-driven addons rely on these.
+if util == nil then util = {} end
+if util.TableToJSON == nil then
+  local function encode( v, pretty, indent )
+    local t = type( v )
+    if t == "nil" then return "null"
+    elseif t == "boolean" then return v and "true" or "false"
+    elseif t == "number" then return tostring( v )
+    elseif t == "string" then
+      return '"' .. v:gsub( '[%z\1-\31\\"]', function( c )
+        local m = { ['"'] = '\\"', ['\\'] = '\\\\', ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t' }
+        return m[ c ] or string.format( '\\u%04x', string.byte( c ) )
+      end ) .. '"'
+    elseif t == "table" then
+      local isArr, n = true, 0
+      for k in pairs( v ) do n = n + 1 if type( k ) ~= "number" then isArr = false end end
+      if isArr and n > 0 then
+        local parts = {}
+        for i = 1, n do parts[ i ] = encode( v[ i ], pretty ) end
+        return "[" .. table.concat( parts, "," ) .. "]"
+      else
+        local parts, i = {}, 0
+        for k, val in pairs( v ) do i = i + 1 parts[ i ] = encode( tostring( k ) ) .. ":" .. encode( val, pretty ) end
+        return "{" .. table.concat( parts, "," ) .. "}"
+      end
+    end
+    return "null"
+  end
+  function util.TableToJSON( t, pretty ) return encode( t, pretty ) end
+end
+if util.JSONToTable == nil then
+  function util.JSONToTable( s )
+    if type( s ) ~= "string" then return nil end
+    local pos = 1
+    local decodeValue
+    local function skip() pos = ( s:find( "[^ \t\r\n]", pos ) ) or ( #s + 1 ) end
+    local function decodeString()
+      pos = pos + 1
+      local buf = {}
+      while pos <= #s do
+        local c = s:sub( pos, pos )
+        if c == '"' then pos = pos + 1 return table.concat( buf )
+        elseif c == '\\' then
+          local n = s:sub( pos + 1, pos + 1 )
+          local m = { ['"'] = '"', ['\\'] = '\\', ['/'] = '/', n = '\n', r = '\r', t = '\t', b = '\b', f = '\f' }
+          if n == 'u' then
+            local hex = s:sub( pos + 2, pos + 5 )
+            buf[ #buf + 1 ] = string.char( tonumber( hex, 16 ) % 256 )
+            pos = pos + 6
+          else buf[ #buf + 1 ] = m[ n ] or n pos = pos + 2 end
+        else buf[ #buf + 1 ] = c pos = pos + 1 end
+      end
+      return table.concat( buf )
+    end
+    decodeValue = function()
+      skip()
+      local c = s:sub( pos, pos )
+      if c == '"' then return decodeString()
+      elseif c == '{' then
+        local obj = {} pos = pos + 1 skip()
+        if s:sub( pos, pos ) == '}' then pos = pos + 1 return obj end
+        while true do
+          skip()
+          local key = decodeString()
+          skip() pos = pos + 1 -- colon
+          obj[ key ] = decodeValue()
+          skip()
+          local d = s:sub( pos, pos ) pos = pos + 1
+          if d == '}' then break end
+        end
+        return obj
+      elseif c == '[' then
+        local arr, i = {}, 0 pos = pos + 1 skip()
+        if s:sub( pos, pos ) == ']' then pos = pos + 1 return arr end
+        while true do
+          i = i + 1 arr[ i ] = decodeValue()
+          skip()
+          local d = s:sub( pos, pos ) pos = pos + 1
+          if d == ']' then break end
+        end
+        return arr
+      elseif c == 't' then pos = pos + 4 return true
+      elseif c == 'f' then pos = pos + 5 return false
+      elseif c == 'n' then pos = pos + 4 return nil
+      else
+        local num = s:match( "^%-?%d+%.?%d*[eE]?[%+%-]?%d*", pos )
+        if num then pos = pos + #num return tonumber( num ) end
+      end
+    end
+    local ok, res = pcall( decodeValue )
+    if ok then return res end
+    return nil
+  end
+end
+
+-- more sorted-iteration / table helpers commonly used at file scope
+if SortedPairsByValue == nil then
+  function SortedPairsByValue( t, desc )
+    local keys = {}
+    for k in pairs( t ) do keys[ #keys + 1 ] = k end
+    table.sort( keys, function( a, b ) if desc then return t[ a ] > t[ b ] else return t[ a ] < t[ b ] end end )
+    local i = 0
+    return function() i = i + 1 local k = keys[ i ] if k ~= nil then return k, t[ k ] end end
+  end
+end
+if SortedPairsByMemberValue == nil then
+  function SortedPairsByMemberValue( t, member, desc )
+    local keys = {}
+    for k in pairs( t ) do keys[ #keys + 1 ] = k end
+    table.sort( keys, function( a, b )
+      local va, vb = t[ a ][ member ], t[ b ][ member ]
+      if desc then return va > vb else return va < vb end
+    end )
+    local i = 0
+    return function() i = i + 1 local k = keys[ i ] if k ~= nil then return k, t[ k ] end end
+  end
+end
+if RandomPairs == nil then
+  function RandomPairs( t )
+    local keys = {}
+    for k in pairs( t ) do keys[ #keys + 1 ] = k end
+    for i = #keys, 2, -1 do local j = math.random( i ) keys[ i ], keys[ j ] = keys[ j ], keys[ i ] end
+    local i = 0
+    return function() i = i + 1 local k = keys[ i ] if k ~= nil then return k, t[ k ] end end
+  end
+end
+table.ForEach = table.ForEach or function( t, fn ) for k, v in pairs( t ) do fn( k, v ) end end
+table.Inherit = table.Inherit or function( t, base ) for k, v in pairs( base ) do if t[ k ] == nil then t[ k ] = v end end t.BaseClass = base return t end
+table.GetFirstKey = table.GetFirstKey or function( t ) local k = next( t ) return k end
+table.GetFirstValue = table.GetFirstValue or function( t ) local k, v = next( t ) return v end
+table.SortByMember = table.SortByMember or function( t, member, asc )
+  table.sort( t, function( a, b ) if asc == false then return a[ member ] > b[ member ] else return a[ member ] < b[ member ] end end )
+  return t
+end
+string.Comma = string.Comma or function( n )
+  n = tostring( n )
+  local out = n:reverse():gsub( "(%d%d%d)", "%1," ):reverse()
+  return ( out:gsub( "^,", "" ) )
+end
+string.FormatTime = string.FormatTime or function( s )
+  s = math.floor( s or 0 )
+  return string.format( "%02i:%02i", math.floor( s / 60 ), s % 60 )
+end
+string.ToMinutesSeconds = string.ToMinutesSeconds or string.FormatTime
+
+-- safety no-op libraries for subsystems this engine lacks. Gated so they
+-- never clobber a real implementation; they only stop addons crashing at
+-- load when they touch these at file scope.
+if resource == nil then
+  resource = {}
+  function resource.AddFile() end
+  function resource.AddSingleFile() end
+  function resource.AddWorkshop() end
+end
+if duplicator == nil then
+  duplicator = {}
+  function duplicator.RegisterEntityClass() end
+  function duplicator.RegisterEntityModifier() end
+  function duplicator.RegisterBoneModifier() end
+  function duplicator.Allow() end
+  function duplicator.Copy() return {} end
+  function duplicator.Paste() return {} end
+  function duplicator.CreateEntityFromTable() return nil end
+end
+if numpad == nil then
+  numpad = {}
+  function numpad.Register() return "" end
+  function numpad.OnUp() return 0 end
+  function numpad.OnDown() return 0 end
+  function numpad.Activate() end
+  function numpad.Deactivate() end
+end
+if properties == nil then
+  properties = {}
+  function properties.Add() end
+  function properties.GetAll() return {} end
+end
+if usermessage == nil then
+  usermessage = {}
+  function usermessage.Hook() end
+  function usermessage.IncomingMessage() end
+end
+if umsg == nil then
+  umsg = {}
+  function umsg.Start() end
+  function umsg.End() end
+  function umsg.Bool() end function umsg.Char() end function umsg.Long() end
+  function umsg.Short() end function umsg.String() end function umsg.Float() end
+  function umsg.Entity() end function umsg.Vector() end function umsg.Angle() end
+end
+
+-- gamemode / GAMEMODE convenience
+if gamemode == nil then
+  gamemode = {}
+  function gamemode.Call( name, ... ) if hook and hook.Call then return hook.Call( name, nil, ... ) end end
+  function gamemode.Register() end
+  function gamemode.Get() return _GAMEMODE or GAMEMODE end
+end
+
+-- client-only draw / surface GMod-name layer. Colors, rects, lines and
+-- textured rects map 1:1 onto the native VGUI surface; fonts are created
+-- through a name->handle cache so surface.SetFont / draw.SimpleText work.
+if CLIENT and surface ~= nil then
+  local fonts = {}
+  local curfont = nil
+  local nativeTextSize = surface.GetTextSize
+  local function colorArgs( r, g, b, a )
+    if type( r ) == "table" then return r.r or 255, r.g or 255, r.b or 255, r.a or 255 end
+    return r or 255, g or 255, b or 255, a or 255
+  end
+
+  surface.SetDrawColor = surface.SetDrawColor or function( r, g, b, a )
+    local cr, cg, cb, ca = colorArgs( r, g, b, a ) surface.DrawSetColor( cr, cg, cb, ca )
+  end
+  surface.SetTextColor = surface.SetTextColor or function( r, g, b, a )
+    local cr, cg, cb, ca = colorArgs( r, g, b, a ) surface.DrawSetTextColor( cr, cg, cb, ca )
+  end
+  surface.DrawRect = surface.DrawRect or function( x, y, w, h ) surface.DrawFilledRect( x, y, x + w, y + h ) end
+  surface.SetTextPos = surface.SetTextPos or surface.DrawSetTextPos
+
+  if surface.CreateFont ~= nil and surface.SetFontGlyphSet ~= nil then
+    local nativeCreate = surface.CreateFont
+    function surface.CreateFont( name, data )
+      if type( name ) ~= "string" then return nativeCreate() end
+      data = data or {}
+      local h = nativeCreate()
+      local flags = 0x200 -- FONTFLAG_ANTIALIAS
+      if data.antialias == false then flags = 0 end
+      surface.SetFontGlyphSet( h, data.font or "Tahoma", data.size or 16, data.weight or 500,
+        data.blursize or 0, data.scanlines or 0, flags )
+      fonts[ name ] = h
+      return h
+    end
+    function surface.SetFont( name )
+      local h = fonts[ name ]
+      if h ~= nil then curfont = h surface.DrawSetTextFont( h ) end
+    end
+  end
+
+  -- GMod's surface.GetTextSize( text ) uses the current font; the native form
+  -- is GetTextSize( font, text ). Support both so base content and addons work.
+  surface.GetTextSize = function( a, b )
+    if type( a ) == "string" then
+      if curfont == nil then return 0, 0 end
+      return nativeTextSize( curfont, a )
+    end
+    return nativeTextSize( a, b )
+  end
+
+  surface.DrawText = surface.DrawText or function( text ) surface.DrawPrintText( tostring( text ) ) end
+
+  if draw == nil then draw = {} end
+  draw.NoTexture = draw.NoTexture or function() surface.DrawSetTexture( -1 ) end
+  draw.RoundedBox = draw.RoundedBox or function( r, x, y, w, h, color )
+    surface.SetDrawColor( color )
+    surface.DrawRect( x, y, w, h )
+  end
+  draw.RoundedBoxEx = draw.RoundedBoxEx or function( r, x, y, w, h, color ) draw.RoundedBox( r, x, y, w, h, color ) end
+  draw.SimpleText = draw.SimpleText or function( text, font, x, y, color, xalign, yalign )
+    text = tostring( text )
+    if font then surface.SetFont( font ) end
+    local tw, th = surface.GetTextSize( text )
+    tw = tw or 0 th = th or 0
+    xalign = xalign or 0 yalign = yalign or 0
+    if xalign == 1 then x = x - tw / 2 elseif xalign == 2 then x = x - tw end
+    if yalign == 1 then y = y - th / 2 elseif yalign == 4 then y = y - th end
+    surface.SetTextColor( color or { r = 255, g = 255, b = 255, a = 255 } )
+    surface.SetTextPos( math.floor( x ), math.floor( y ) )
+    surface.DrawText( text )
+    return tw, th
+  end
+  draw.Text = draw.Text or function( t )
+    return draw.SimpleText( t.text, t.font, t.pos and t.pos[ 1 ] or 0, t.pos and t.pos[ 2 ] or 0,
+      t.color, t.xalign, t.yalign )
+  end
+  draw.DrawText = draw.DrawText or function( text, font, x, y, color, xalign )
+    return draw.SimpleText( text, font, x, y, color, xalign )
+  end
+
+  -- draw / text alignment enums
+  if TEXT_ALIGN_LEFT == nil then
+    TEXT_ALIGN_LEFT = 0; TEXT_ALIGN_CENTER = 1; TEXT_ALIGN_RIGHT = 2
+    TEXT_ALIGN_TOP = 3; TEXT_ALIGN_BOTTOM = 4
+  end
+end
 )GLUACOMPAT";
 
 // Time globals. GMod addons call these constantly (often unguarded), but the
