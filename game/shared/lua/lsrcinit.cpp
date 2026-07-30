@@ -13,6 +13,10 @@
 
 #include "luasrclib.h"
 #include "lauxlib.h"
+#include "lbaseplayer_shared.h"  // lua_pushplayer, for the LocalPlayer() global
+#ifdef CLIENT_DLL
+#include "c_baseplayer.h"        // C_BasePlayer::GetLocalPlayer()
+#endif
 
 
 static const luaL_Reg luasrclibs[] = {
@@ -683,24 +687,6 @@ end
 if table.IsEmpty == nil then function table.IsEmpty( t ) return next( t ) == nil end end
 if table.Empty == nil then function table.Empty( t ) for k in pairs( t ) do t[k] = nil end end end
 
--- One-time boot diagnostic: report what the compat layer actually resolved on
--- this realm, so device logs can confirm the metatable shims landed.
-do
-  local rg = ( debug and debug.getregistry ) and debug.getregistry() or {}
-  local E, P = rg.CBaseEntity or {}, rg.CBasePlayer or {}
-  local out = print or Msg
-  if out then
-    out( "[gmodcompat] realm=" .. ( SERVER and "server" or "client" ) ..
-         " util.TraceLine=" .. tostring( util and util.TraceLine ~= nil ) ..
-         " util.EntsInSphere=" .. tostring( util and util.EntitiesInSphere ~= nil ) ..
-         " DamageInfo=" .. tostring( DamageInfo ~= nil ) ..
-         " effect=" .. tostring( effect ~= nil ) ..
-         " ENT.TakeDamageInfo=" .. tostring( E.TakeDamageInfo ~= nil ) ..
-         " ENT.Dissolve=" .. tostring( E.Dissolve ~= nil ) ..
-         " PLY.GetEyeTrace=" .. tostring( P.GetEyeTrace ~= nil ) .. "\n" )
-  end
-end
-
 -- server/shared prop-management shims (no-op where unsupported)
 if cleanup == nil then
   cleanup = {}
@@ -791,16 +777,23 @@ end
 -- they exist; pure Lua where self-contained.
 -- ===================================================================
 
+-- AccessorFunc force-type enums. GMod's real values are STRING=1, NUMBER=2,
+-- BOOL=3 (garrysmod util.lua); addons pass these by name, so they must exist.
+if FORCE_STRING == nil then FORCE_STRING = 1; FORCE_NUMBER = 2; FORCE_BOOL = 3 end
+
 -- AccessorFunc: generate Get<Name>/Set<Name> on a table. Ubiquitous in
 -- ENT/SWEP/tool definitions; its absence crashed addons at file scope.
+-- Coercion mapping matches GMod exactly (1=tostring, 2=tonumber, 3=tobool);
+-- an earlier version had these inverted, which silently corrupted any addon
+-- that used a forced accessor.
 if AccessorFunc == nil then
   function AccessorFunc( tab, key, name, force )
     if tab == nil then return end
     tab[ "Get" .. name ] = function( self ) return self[ key ] end
     tab[ "Set" .. name ] = function( self, v )
-      if force == 1 then v = tonumber( v ) or 0
-      elseif force == 2 then v = tobool( v )
-      elseif force == 3 then v = tostring( v ) end
+      if force == FORCE_STRING then v = tostring( v )
+      elseif force == FORCE_NUMBER then v = tonumber( v )
+      elseif force == FORCE_BOOL then v = tobool( v ) end
       self[ key ] = v
     end
   end
@@ -1114,6 +1107,138 @@ if gamemode == nil then
   function gamemode.Get() return _GAMEMODE or GAMEMODE end
 end
 
+-- concommand: GMod's console-command library. The engine ALREADY dispatches
+-- registered console commands into Lua by calling the global concommand.Dispatch
+-- (see CC_ConCommand in lconvar.cpp) with (player, cmd, argString). We keep the
+-- name->callback map here and register each command with the native ConCommand()
+-- so it actually fires. Addons call concommand.Add at file scope, so this must
+-- exist before autorun runs.
+if concommand == nil and ConCommand ~= nil then
+  local cmds, complete = {}, {}
+  -- tokenize an argument string, respecting double-quoted groups (GMod does).
+  local function parseArgs( s )
+    local t = {}
+    if type( s ) ~= "string" then return t end
+    local i, n = 1, #s
+    while i <= n do
+      local c = s:sub( i, i )
+      if c == " " or c == "\t" then
+        i = i + 1
+      elseif c == '"' then
+        local j = s:find( '"', i + 1, true )
+        if j then t[ #t + 1 ] = s:sub( i + 1, j - 1 ) i = j + 1
+        else t[ #t + 1 ] = s:sub( i + 1 ) break end
+      else
+        local j = s:find( "[ \t]", i )
+        if j then t[ #t + 1 ] = s:sub( i, j - 1 ) i = j
+        else t[ #t + 1 ] = s:sub( i ) break end
+      end
+    end
+    return t
+  end
+  concommand = {}
+  function concommand.Add( name, fn, autofn, help, flags )
+    if type( name ) ~= "string" or type( fn ) ~= "function" then return end
+    local key = string.lower( name )
+    cmds[ key ] = fn
+    complete[ key ] = autofn
+    ConCommand( name, help or "", flags or 0 ) -- register with the engine
+  end
+  function concommand.Remove( name ) local k = string.lower( name ) cmds[ k ] = nil complete[ k ] = nil end
+  function concommand.GetTable() return cmds end
+  function concommand.AutoComplete( name, argstr )
+    local fn = complete[ string.lower( name or "" ) ]
+    if fn then return fn( name, argstr ) end
+    return {}
+  end
+  -- Invoked by the engine when a registered command runs. Returning false makes
+  -- the engine print "Unknown command"; true means we handled it.
+  function concommand.Dispatch( ply, cmd, argstr )
+    local fn = cmds[ string.lower( cmd or "" ) ]
+    if fn == nil then return false end
+    fn( ply, cmd, parseArgs( argstr ), argstr or "" )
+    return true
+  end
+end
+
+-- RunConsoleCommand( cmd, args... ): run a console command. The native engine
+-- library exposes ServerCommand/ServerExecute, so route through it; if that is
+-- unavailable (client realm), fall back to setting a matching convar directly.
+if RunConsoleCommand == nil then
+  function RunConsoleCommand( cmd, ... )
+    local args = { ... }
+    for i = 1, #args do args[ i ] = tostring( args[ i ] ) end
+    local line = tostring( cmd )
+    if #args > 0 then line = line .. " " .. table.concat( args, " " ) end
+    if engine ~= nil and engine.ServerCommand ~= nil then
+      engine.ServerCommand( line .. "\n" )
+      if engine.ServerExecute ~= nil then engine.ServerExecute() end
+      return
+    end
+    local c = GetConVar and GetConVar( cmd )
+    if c and args[ 1 ] ~= nil then c:SetString( args[ 1 ] ) end
+  end
+end
+
+-- util.PrecacheModel / util.PrecacheSound: GMod globals many SWEPs call at
+-- file scope. Back them with the engine precache when available (pcall-guarded
+-- so a bad-timing call never aborts addon load); models also auto-precache on
+-- SetModel, so a no-op fallback is still safe.
+if util.PrecacheModel == nil then
+  function util.PrecacheModel( m ) if engine and engine.PrecacheModel then pcall( engine.PrecacheModel, m ) end end
+end
+if util.PrecacheSound == nil then
+  function util.PrecacheSound( s ) if engine and engine.PrecacheGeneric then pcall( engine.PrecacheGeneric, s ) end end
+end
+
+-- game library: map/server info + prop-management no-ops. Only the pieces
+-- addons touch at file scope or in shared logic; unknown values degrade to
+-- honest defaults for this single-player-derived sandbox port.
+if game == nil then
+  game = {}
+  function game.SinglePlayer() return true end
+  function game.MaxPlayers() return math.max( 1, ( player and player.GetAll and #player.GetAll() ) or 1 ) end
+  function game.GetMap() return ( engine and engine.GetMapEntitiesString and "" ) or "" end
+  function game.GetIPAddress() return "127.0.0.1:27015" end
+  function game.IsDedicated() return false end
+  function game.AddParticles() end
+  function game.AddDecal() end
+  function game.CleanUpMap() end
+  function game.ConsoleCommand( cmd ) if RunConsoleCommand then RunConsoleCommand( cmd ) end end
+  function game.GetWorld() return ( ents and ents.GetByIndex and ents.GetByIndex( 0 ) ) or NULL end
+end
+
+-- team library: GMod implements this in Lua, so port it faithfully. Team data
+-- lives in a local table; scores/membership work against the player list.
+if team == nil then
+  team = {}
+  local teams = {}
+  function team.SetUp( id, name, color, joinable )
+    local t = teams[ id ] or {}
+    t.Name = name; t.Color = color or Color( 255, 255, 255 )
+    t.Joinable = joinable ~= false; t.Score = t.Score or 0
+    teams[ id ] = t
+  end
+  function team.Valid( id ) return teams[ id ] ~= nil end
+  function team.GetName( id ) local t = teams[ id ] return t and t.Name or "" end
+  function team.GetColor( id ) local t = teams[ id ] return t and t.Color or Color( 255, 255, 255 ) end
+  function team.SetColor( id, c ) local t = teams[ id ] if t then t.Color = c end end
+  function team.GetAllTeams() return teams end
+  function team.GetScore( id ) local t = teams[ id ] return t and t.Score or 0 end
+  function team.SetScore( id, s ) local t = teams[ id ] if t then t.Score = s end end
+  function team.AddScore( id, s ) local t = teams[ id ] if t then t.Score = ( t.Score or 0 ) + s end end
+  function team.Joinable( id ) local t = teams[ id ] return t ~= nil and t.Joinable ~= false end
+  function team.GetPlayers( id )
+    local out = {}
+    for _, p in ipairs( player.GetAll() ) do if p.Team and p:Team() == id then out[ #out + 1 ] = p end end
+    return out
+  end
+  function team.NumPlayers( id ) return #team.GetPlayers( id ) end
+  function team.BestAutoJoinTeam() return 1 end
+  function team.TotalDeaths() return 0 end
+  function team.TotalFrags() return 0 end
+end
+
 -- client-only draw / surface GMod-name layer. Colors, rects, lines and
 -- textured rects map 1:1 onto the native VGUI surface; fonts are created
 -- through a name->handle cache so surface.SetFont / draw.SimpleText work.
@@ -1199,6 +1324,15 @@ if CLIENT and surface ~= nil then
     TEXT_ALIGN_LEFT = 0; TEXT_ALIGN_CENTER = 1; TEXT_ALIGN_RIGHT = 2
     TEXT_ALIGN_TOP = 3; TEXT_ALIGN_BOTTOM = 4
   end
+
+  -- screen dimensions, backed by the native surface.GetScreenSize (wide, tall).
+  -- ScreenScale scales a 640-wide reference value to the real resolution.
+  if ScrW == nil and surface.GetScreenSize ~= nil then
+    function ScrW() local w = surface.GetScreenSize() return w end
+    function ScrH() local _, h = surface.GetScreenSize() return h end
+  end
+  if ScreenScale == nil then function ScreenScale( s ) return s * ( ( ScrW and ScrW() or 640 ) / 640 ) end end
+  SScale = SScale or ScreenScale
 end
 )GLUACOMPAT";
 
@@ -1221,6 +1355,18 @@ static const luaL_Reg s_GModTimeGlobals[] = {
   { NULL, NULL }
 };
 
+#ifdef CLIENT_DLL
+// LocalPlayer(): GMod's most-used client global (viewmodels, HUD, prediction).
+// The engine exposes no Lua binding for it, so read C_BasePlayer::GetLocalPlayer
+// directly. A NULL result (before spawn) becomes an invalid entity handle,
+// matching GMod's NULL, so IsValid( LocalPlayer() ) works during load.
+static int luasrc_LocalPlayer( lua_State *L )
+{
+  lua_pushplayer( L, C_BasePlayer::GetLocalPlayer() );
+  return 1;
+}
+#endif
+
 LUALIB_API void luasrc_openlibs (lua_State *L) {
   const luaL_Reg *lib = luasrclibs;
   for (; lib->func; lib++) {
@@ -1235,6 +1381,12 @@ LUALIB_API void luasrc_openlibs (lua_State *L) {
     lua_pushcfunction( L, t->func );
     lua_setglobal( L, t->name );
   }
+
+#ifdef CLIENT_DLL
+  // LocalPlayer() global (client only).
+  lua_pushcfunction( L, luasrc_LocalPlayer );
+  lua_setglobal( L, "LocalPlayer" );
+#endif
 
   // The shared util functions (TraceLine, EntitiesInSphere, AddNetworkString,
   // ...) were not reaching the util table via luaopen_UTIL_shared; force them
