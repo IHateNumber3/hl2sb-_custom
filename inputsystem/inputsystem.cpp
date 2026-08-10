@@ -715,8 +715,7 @@ void CInputSystem::PollInputState_Platform()
 
 				case CocoaEvent_KeyDown:
 				{
-					case CocoaEvent_KeyDown:
-{
+					
     ButtonCode_t virtualCode;
     if ( MapCocoaVirtualKeyToButtonCode( pEvent->m_VirtualKeyCode, &virtualCode ) )
     {
