@@ -1559,3 +1559,10 @@ void CInputSystem::StartTextInput()
 	SDL_StartTextInput();
 #endif
 }
+
+void CInputSystem::StopTextInput()
+{
+#ifdef USE_SDL
+	SDL_StopTextInput();
+#endif
+}
