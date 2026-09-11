@@ -247,5 +247,7 @@ LUALIB_API int (luaopen_VMatrix) (lua_State *L);
 LUALIB_API void (luasrc_openlibs) (lua_State *L); 
 
 
+#define LUA_IOLIBNAME				"io"
+LUALIB_API int (luaopen_io) (lua_State *L);
 
 #endif // LUASRCLIB_H

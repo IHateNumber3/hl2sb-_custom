@@ -303,6 +303,7 @@ void luasrc_init (void) {
   luasrc_setmodulepaths(L);
 
   luasrc_openlibs(L);
+  luaopen_io(L);
 
   ConColorMsg( Color(40, 237, 237, 255), "Lua initialized (" LUA_VERSION ")\n" );
 }
