@@ -1,10 +1,7 @@
 name: Tests
 
-<<<<<<< HEAD
-=======
 on: [workflow_dispatch]
 
->>>>>>> 40c5255b06c4f7dc240e4e9e3356e0d3a9940b2f
 jobs:
   tests-linux-i386:
     runs-on: ubuntu-20.04
