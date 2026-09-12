@@ -1,6 +1,6 @@
 //========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: I/O system for Lua (inout)
+// Purpose: I/O system for Lua
 //
 //=============================================================================//
 
@@ -11,7 +11,6 @@
 
 #include "tier0/memdbgon.h"
 
-// Создание Output на энтити
 static int luasrc_ents_CreateIOOutput(lua_State *L) {
 	CBaseEntity *pEnt = luaL_checkentity(L, 1);
 	const char *szName = luaL_checkstring(L, 2);
@@ -41,7 +40,6 @@ static int luasrc_ents_CreateIOOutput(lua_State *L) {
 	return 1;
 }
 
-// Создание Input на энтити
 static int luasrc_ents_CreateIOInput(lua_State *L) {
 	CBaseEntity *pEnt = luaL_checkentity(L, 1);
 	const char *szName = luaL_checkstring(L, 2);
@@ -67,9 +65,7 @@ static int luasrc_ents_CreateIOInput(lua_State *L) {
 	return 1;
 }
 
-// Связывание Output и Input
 static int luasrc_ents_IOConnect(lua_State *L) {
-	// inout.IOConnect(input, output)
 	if (!lua_istable(L, 1) || !lua_istable(L, 2)) {
 		lua_pushboolean(L, false);
 		return 1;
@@ -77,9 +73,9 @@ static int luasrc_ents_IOConnect(lua_State *L) {
 	
 	lua_getfield(L, 1, "connections");
 	if (lua_istable(L, -1)) {
-		int idx = lua_objlen(L, -1) + 1;
+		int idx = lua_objlen(L, -1);
 		lua_pushvalue(L, 2);
-		lua_rawseti(L, -2, idx);
+		lua_rawseti(L, -2, idx + 1);
 		lua_pop(L, 1);
 		lua_pushboolean(L, true);
 		return 1;
@@ -89,13 +85,16 @@ static int luasrc_ents_IOConnect(lua_State *L) {
 	return 1;
 }
 
-// Запуск срабатывания Input
 static int luasrc_ents_FireIOInput(lua_State *L) {
 	if (!lua_istable(L, 1)) {
 		return 0;
 	}
 	
 	lua_getfield(L, 1, "entity");
+	if (lua_isnil(L, -1)) {
+		lua_pop(L, 1);
+		return 0;
+	}
 	CBaseEntity *pEnt = lua_toentity(L, -1);
 	lua_pop(L, 1);
 	
@@ -105,20 +104,19 @@ static int luasrc_ents_FireIOInput(lua_State *L) {
 	const char *szInputName = lua_tostring(L, -1);
 	lua_pop(L, 1);
 	
-	// Вызов Lua хука OnIOInputFired
 	lua_getglobal(L, "hook");
 	if (lua_istable(L, -1)) {
 		lua_getfield(L, -1, "Call");
 		if (lua_isfunction(L, -1)) {
 			lua_pushstring(L, "OnIOInputFired");
 			lua_pushentity(L, pEnt);
-			lua_pushstring(L, szInputName);
-			if (lua_gettop(L) > 2 && !lua_isnil(L, 2)) {
-				lua_pushvalue(L, 2);
+			lua_pushstring(L, szInputName ? szInputName : "");
+			if (lua_gettop(L) > 4) {
+				lua_pushvalue(L, 3);
 			} else {
 				lua_pushnil(L);
 			}
-			luasrc_pcall(L, 4, 0, 0);
+			lua_pcall(L, 4, 0, 0);
 		} else {
 			lua_pop(L, 1);
 		}
@@ -136,15 +134,7 @@ static const luaL_Reg inout_funcs[] = {
 	{NULL, NULL}
 };
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 LUALIB_API int luaopen_inout (lua_State *L) {
-	luaL_register(L, LUA_INOUTLIBNAME, inout_funcs);
+	luaL_register(L, "inout", inout_funcs);
 	return 1;
 }
-
-#ifdef __cplusplus
-}
-#endif
