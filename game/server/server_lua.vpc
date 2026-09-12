@@ -54,7 +54,7 @@ $Project "Server (HL2MP)"
 		$File "$SRCDIR/game/shared/lua/ltakedamageinfo.cpp"
 		$File "$SRCDIR/game/shared/lua/weapon_hl2mpbase_scriptedweapon.cpp"
 		$File "$SRCDIR/game/shared/lua/mountaddons.cpp"
-        $File "$SRCDIR/game/shared/lio_shared.cpp"
+        $File "$SRCDIR/game/shared/lua/lio_shared.cpp"
 
 		$File "$SRCDIR/public/lua/licvar.cpp"
 		$File "$SRCDIR/public/lua/lnetworkstringtabledefs.cpp"
