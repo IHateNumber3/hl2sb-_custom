@@ -68,9 +68,10 @@ static int luasrc_ents_IOConnect(lua_State *L) {
 		return 1;
 	}
 	
-	// Add output to input's connections
+	// Add output to input's connections (or vice versa)
 	lua_getfield(L, 1, "connections");
 	if (!lua_istable(L, -1)) {
+		lua_pop(L, 1);
 		lua_newtable(L);
 		lua_setfield(L, 1, "connections");
 		lua_getfield(L, 1, "connections");
@@ -85,8 +86,7 @@ static int luasrc_ents_IOConnect(lua_State *L) {
 	return 1;
 }
 
-static int luasrc_ents_FireIOInput(lua_State *L);
-
+// Output є кінцевою точкою виконання (Terminal Endpoint)
 static int luasrc_ents_FireIOOutput(lua_State *L) {
 	if (!lua_istable(L, 1)) {
 		return 0;
@@ -129,11 +129,11 @@ static int luasrc_ents_FireIOOutput(lua_State *L) {
 		}
 	}
 	lua_pop(L, 1);
-	lua_pop(L, 1);
 	
 	return 0;
 }
 
+// Input обробляє свою дію та передає сигнал далі у свої connections (Output-и)
 static int luasrc_ents_FireIOInput(lua_State *L) {
 	if (!lua_istable(L, 1)) {
 		return 0;
@@ -177,7 +177,7 @@ static int luasrc_ents_FireIOInput(lua_State *L) {
 	}
 	lua_pop(L, 1);
 	
-	// Fire connected outputs
+	// Передаємо сигнал у підключені Output-и
 	lua_getfield(L, 1, "connections");
 	if (lua_istable(L, -1)) {
 		int len = lua_objlen(L, -1);
