@@ -1,4 +1,4 @@
-//========== Copyleft � 2011, Team Sandbox, Some rights reserved. ===========//
+//========== Copyleft  2011, Team Sandbox, Some rights reserved. ===========//
 //
 // Purpose: 
 //
@@ -244,7 +244,16 @@ LUALIB_API int (luaopen_vgui) (lua_State *L);
 LUALIB_API int (luaopen_VMatrix) (lua_State *L);
 
 #define LUA_INOUTLIBNAME				"inout"
-LUALIB_API int (luaopen_inout) (lua_State *L);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+LUALIB_API int luaopen_inout (lua_State *L);
+
+#ifdef __cplusplus
+}
+#endif
 
 /* open all Source Engine libraries */
 LUALIB_API void (luasrc_openlibs) (lua_State *L); 
