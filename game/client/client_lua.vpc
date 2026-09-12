@@ -55,6 +55,7 @@ $Project "Client (HL2SB)"
 		$File "$SRCDIR/game/shared/lua/lin_buttons.cpp"
 		$File "$SRCDIR/game/shared/lua/weapon_hl2mpbase_scriptedweapon.cpp"
 		$File "$SRCDIR/game/shared/lua/mountaddons.cpp"
+        $File "$SRCDIR/game/shared/lua/lio_shared.cpp"
 		
 		$File "$SRCDIR/public/lua/vgui/LISurface.cpp"
 		$File "$SRCDIR/public/lua/lColor.cpp"
