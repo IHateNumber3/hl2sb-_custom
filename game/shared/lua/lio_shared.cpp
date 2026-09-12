@@ -25,7 +25,15 @@ static const luaL_Reg io_funcs[] = {
 	{NULL, NULL}
 };
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 LUALIB_API int luaopen_inout (lua_State *L) {
 	luaL_register(L, LUA_INOUTLIBNAME, io_funcs);
 	return 1;
 }
+
+#ifdef __cplusplus
+}
+#endif
