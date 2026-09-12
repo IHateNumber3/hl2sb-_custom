@@ -243,11 +243,10 @@ LUALIB_API int (luaopen_vgui) (lua_State *L);
 #define LUA_VMATRIXLIBNAME				"vmatrix"
 LUALIB_API int (luaopen_VMatrix) (lua_State *L);
 
-/* open all Source Engine libraries */
-LUALIB_API void (luasrc_openlibs) (lua_State *L); 
-
-
 #define LUA_IOLIBNAME				"io"
 LUALIB_API int (luaopen_io) (lua_State *L);
+
+/* open all Source Engine libraries */
+LUALIB_API void (luasrc_openlibs) (lua_State *L); 
 
 #endif // LUASRCLIB_H
