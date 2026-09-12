@@ -301,9 +301,8 @@ void luasrc_init (void) {
 
   // Andrew; Someone set us up the path for great justice
   luasrc_setmodulepaths(L);
-
-  luasrc_openlibs(L);
   luaopen_io(L);
+  luasrc_openlibs(L);
 
   ConColorMsg( Color(40, 237, 237, 255), "Lua initialized (" LUA_VERSION ")\n" );
 }
