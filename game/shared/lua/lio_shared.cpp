@@ -129,26 +129,6 @@ static int luasrc_ents_FireIOOutput(lua_State *L) {
 		}
 	}
 	lua_pop(L, 1);
-	
-	// Fire connected inputs
-	lua_getfield(L, 1, "connections");
-	if (lua_istable(L, -1)) {
-		int len = lua_objlen(L, -1);
-		for (int i = 1; i <= len; i++) {
-			lua_rawgeti(L, -1, i);
-			if (lua_istable(L, -1)) {
-				lua_pushcfunction(L, luasrc_ents_FireIOInput);
-				lua_pushvalue(L, -2);
-				
-				if (paramCount > 1) {
-					lua_pushvalue(L, 2);
-				}
-				
-				lua_pcall(L, paramCount > 1 ? 2 : 1, 0, 0);
-			}
-			lua_pop(L, 1);
-		}
-	}
 	lua_pop(L, 1);
 	
 	return 0;
