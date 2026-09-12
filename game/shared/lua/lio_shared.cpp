@@ -90,6 +90,9 @@ static int luasrc_ents_FireIOInput(lua_State *L) {
 		return 0;
 	}
 	
+	// Сохраняем информацию о втором параметре ДО манипуляции
+	int paramCount = lua_gettop(L);
+	
 	lua_getfield(L, 1, "entity");
 	if (lua_isnil(L, -1)) {
 		lua_pop(L, 1);
@@ -108,11 +111,19 @@ static int luasrc_ents_FireIOInput(lua_State *L) {
 	if (lua_istable(L, -1)) {
 		lua_getfield(L, -1, "Call");
 		if (lua_isfunction(L, -1)) {
-			lua_pushstring(L, "OnIOInputFired");  // event
-			lua_pushnil(L);                        // gamemode (nil)
-			lua_pushentity(L, pEnt);               // entity
-			lua_pushstring(L, szInputName ? szInputName : "");  // inputName
-			lua_pcall(L, 4, 0, 0);  // 4 параметра
+			lua_pushstring(L, "OnIOInputFired");
+			lua_pushnil(L);
+			lua_pushentity(L, pEnt);
+			lua_pushstring(L, szInputName ? szInputName : "");
+			
+			// Если было 2+ параметра - передаём значение
+			if (paramCount > 1) {
+				lua_pushvalue(L, 2);
+			} else {
+				lua_pushnil(L);
+			}
+			
+			lua_pcall(L, 5, 0, 0);
 		} else {
 			lua_pop(L, 1);
 		}
