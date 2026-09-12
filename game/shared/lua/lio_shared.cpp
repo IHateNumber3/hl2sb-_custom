@@ -108,15 +108,11 @@ static int luasrc_ents_FireIOInput(lua_State *L) {
 	if (lua_istable(L, -1)) {
 		lua_getfield(L, -1, "Call");
 		if (lua_isfunction(L, -1)) {
-			lua_pushstring(L, "OnIOInputFired");
-			lua_pushentity(L, pEnt);
-			lua_pushstring(L, szInputName ? szInputName : "");
-			if (lua_gettop(L) > 4) {
-				lua_pushvalue(L, 3);
-			} else {
-				lua_pushnil(L);
-			}
-			lua_pcall(L, 4, 0, 0);
+			lua_pushstring(L, "OnIOInputFired");  // event
+			lua_pushnil(L);                        // gamemode (nil)
+			lua_pushentity(L, pEnt);               // entity
+			lua_pushstring(L, szInputName ? szInputName : "");  // inputName
+			lua_pcall(L, 4, 0, 0);  // 4 параметра
 		} else {
 			lua_pop(L, 1);
 		}
@@ -125,6 +121,7 @@ static int luasrc_ents_FireIOInput(lua_State *L) {
 	
 	return 0;
 }
+
 
 static const luaL_Reg inout_funcs[] = {
 	{"CreateIOOutput", luasrc_ents_CreateIOOutput},
