@@ -113,8 +113,8 @@ static int luasrc_ents_FireIOInput(lua_State *L) {
 			lua_pushstring(L, "OnIOInputFired");
 			lua_pushentity(L, pEnt);
 			lua_pushstring(L, szInputName);
-			if (lua_gettop(L) > 3 && !lua_isnil(L, 3)) {
-				lua_pushvalue(L, 3);
+			if (lua_gettop(L) > 2 && !lua_isnil(L, 2)) {
+				lua_pushvalue(L, 2);
 			} else {
 				lua_pushnil(L);
 			}
