@@ -104,18 +104,23 @@ const char *IOS_GetExecDir(void)
 		self.view.backgroundColor = [UIColor colorWithRed:0.3 green:0.5 blue:0.3 alpha:1.0];
 	}
 	
-	// Logo + MOD 0 (top left)
-	UILabel *logoLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 50, 100, 40)];
-	logoLabel.text = @"HL2SB+++";
-	logoLabel.font = [UIFont boldSystemFontOfSize:16];
-	logoLabel.textColor = [UIColor whiteColor];
-	[self.view addSubview:logoLabel];
-	
-	UILabel *modLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 30, 100, 20)];
-	modLabel.text = @"MOD 0";
-	modLabel.font = [UIFont boldSystemFontOfSize:12];
-	modLabel.textColor = [UIColor redColor];
-	[self.view addSubview:modLabel];
+	// Logo Image + MODDED (top left)
+	UIImage *logoImg = [UIImage imageNamed:@"logo.png"];
+	if(logoImg) {
+		UIImageView *logoView = [[UIImageView alloc] initWithImage:logoImg];
+		// Налаштовуємо позицію та розмір під верхній лівий кут
+		logoView.frame = CGRectMake(10, 10, 60, 60);
+		logoView.contentMode = UIViewContentModeScaleAspectFit;
+		[self.view addSubview:logoView];
+	} else {
+		// Резервний варіант, якщо logo.png відсутній
+		UILabel *logoLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, 100, 25)];
+		logoLabel.text = @"HL2SB+++";
+		logoLabel.font = [UIFont boldSystemFontOfSize:16];
+		logoLabel.textColor = [UIColor whiteColor];
+		[self.view addSubview:logoLabel];
+	}
+
 	
 	// Settings button (top right)
 	UIButton *settingsBtn = [[UIButton alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 60, 40, 50, 50)];
