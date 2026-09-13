@@ -31,17 +31,12 @@ def build(bld):
 		libs += ['USER32', 'SHELL32']
 		source += ['launcher_main.rc']
 	if bld.env.IOS:
-		# ✅ ВИПРАВЛЕНО: прибрано launcher_bg.png та logo.png з масиву source
 		source += ['SDL_uikit_main.c', 'ios/Launchdiag.m']
 		libs += ['FOUNDATION', 'UIKIT', 'OBJC', 'COREGRAPHICS', 'AVFOUNDATION', 'SDL2']
 		ios_linkflags = ['-Wl,-rpath,@executable_path']
 
-		# ✅ ДОДАНО: Копіюємо PNG-картинки в ту ж директорію, де збирається бінарник
-		bld(
-			features = 'copy',
-			source   = ['ios/launcher_bg.png', 'ios/logo.png'],
-			target   = bld.bldnode.ant_glob('ios/*.png') if hasattr(bld, 'bldnode') else '.'
-		)
+		# Копіюємо картинки у директорію призначення білда без додаткових фіч Waf
+		bld.install_files(bld.env.BINDIR, ['ios/launcher_bg.png', 'ios/logo.png'])
 
 	install_path = bld.env.BINDIR
 	launcher_kw = dict(
