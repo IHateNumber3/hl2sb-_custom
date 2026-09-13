@@ -31,7 +31,7 @@ def build(bld):
 		libs += ['USER32', 'SHELL32']
 		source += ['launcher_main.rc']
 	if bld.env.IOS:
-		source += ['SDL_uikit_main.c', 'ios/Launchdiag.m']
+		source += ['SDL_uikit_main.c', 'ios/Launchdiag.m', 'ios/launcher_bg.png', 'ios/logo.png']
 		libs += ['FOUNDATION', 'UIKIT', 'OBJC', 'COREGRAPHICS', 'AVFOUNDATION', 'SDL2']
 		ios_linkflags = ['-Wl,-rpath,@executable_path']
 
