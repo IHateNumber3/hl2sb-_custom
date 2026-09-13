@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Portal</string>
+	<string>HL2SB+++ CUSTOM</string>
 	<key>CFBundleExecutable</key>
 	<string>hl2_launcher</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.sourceengine.portal</string>
+	<string>com.sourceengine.custom</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Portal</string>
+	<string>HL2SB+++ CUSTOM</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,13 +29,13 @@
 	<key>MinimumOSVersion</key>
 	<string>12.0</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Portal uses the microphone for in-game voice chat.</string>
+	<string>HL2SB+++ CUSTOM uses the microphone for in-game voice chat.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Portal uses Bluetooth to connect wireless game controllers.</string>
+	<string>HL2SB+++ CUSTOM uses Bluetooth to connect wireless game controllers.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Portal uses Bluetooth to connect wireless game controllers.</string>
+	<string>HL2SB+++ CUSTOM uses Bluetooth to connect wireless game controllers.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Portal uses motion data for accelerometer-based controls.</string>
+	<string>HL2SB+++ CUSTOM uses motion data for accelerometer-based controls.</string>
 	<key>GCSupportsControllerUserInteraction</key>
 	<true/>
 	<key>UIRequiresPersistentWiFi</key>
@@ -46,6 +46,7 @@
 	<array>
 		<string>arm64</string>
 		<string>metal</string>
+        <string>angle</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
