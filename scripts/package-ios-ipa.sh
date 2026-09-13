@@ -49,6 +49,15 @@ for fw in libEGL.framework libGLESv2.framework; do
 done
 
 cp "${ROOT}/ios/Info.plist" "${APP_DIR}/Info.plist"
+echo "==> Copying UI resources"
+if [ -f "${ROOT}/launcher_main/ios/logo.png" ]; then
+	cp "${ROOT}/launcher_main/ios/logo.png" "${APP_DIR}/logo.png"
+fi
+
+if [ -f "${ROOT}/launcher_main/ios/launcher_bg.png" ]; then
+	cp "${ROOT}/launcher_main/ios/launcher_bg.png" "${APP_DIR}/launcher_bg.png"
+fi
+
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_ID}" "${APP_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${BUNDLE_VERSION}" "${APP_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${APP_DIR}/Info.plist"
