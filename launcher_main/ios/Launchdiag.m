@@ -1,16 +1,5 @@
 /*
- Launchdialog.m - iOS launch dialog with custom UI
- Copyright (C) 2016 mittorn
- 
- This program is free software: you can redistribute it and/or modify
- it under the terms of the GNU General Public License as published by
- the Free Software Foundation, either version 3 of the License, or
- (at your option) any later version.
- 
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
+ Launchdialog.m - iOS launch dialog with dynamic button sizing and transparent UI
  */
 
 #import <Foundation/Foundation.h>
@@ -24,7 +13,7 @@ char **szArgv;
 char *g_szLibrarySuffix;
 float g_iOSVer;
 bool isdark;
-int g_buttonSize = 60;
+int g_buttonSize = 45; // Стандартний розмір кнопок
 bool g_devMode = false;
 bool g_shouldStart = false;
 
@@ -44,30 +33,19 @@ typedef struct settings_s
 const char *IOS_GetDocsDir(void)
 {
 	static const char *dir = NULL;
-	
-	if( dir )
-		return dir;
-	
+	if( dir ) return dir;
 	NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
 	NSString *documentsDirctory = [paths objectAtIndex:0];
 	[[NSFileManager defaultManager] createDirectoryAtPath:documentsDirctory withIntermediateDirectories:YES attributes:nil error:nil];
-	
 	dir = [documentsDirctory fileSystemRepresentation];
-	NSLog(@"IOS_GetDocsDir: %s", dir);
-	
 	return dir;
 }
 
 const char *IOS_GetExecDir(void)
 {
 	static const char *dir = NULL;
-	
-	if( dir )
-		return dir;
-
+	if( dir ) return dir;
 	dir = [[[NSBundle mainBundle] bundleURL] fileSystemRepresentation];
-	NSLog(@"IOS_GetExecDir: %s", dir);
-	
 	return dir;
 }
 
@@ -77,7 +55,10 @@ const char *IOS_GetExecDir(void)
 	UITextField *suffixTextField;
 	UISwitch *devModeSwitch;
 	UISlider *buttonSizeSlider;
-	UIView *suffixContainer;
+	UIView *cardView;
+	
+	NSString *savedArgsText;
+	NSString *savedSuffixText;
 }
 
 @property (nonatomic, assign) BOOL shouldStart;
@@ -90,16 +71,22 @@ const char *IOS_GetExecDir(void)
 {
 	[super viewDidLoad];
 	
-	// Tap gesture to dismiss keyboard
+	savedArgsText = @"-game hl2sbpp";
+	savedSuffixText = @"";
+	
+	[self loadSettings];
+	
+	// Закриття клавіатури за тапом
 	UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
 	tap.cancelsTouchesInView = NO;
 	[self.view addGestureRecognizer:tap];
 	
-	// Safe Background Loading
+	// 1. Фоновій малюнок
 	NSString *bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"png"];
-	UIImage *bgImage = bgPath ? [UIImage imageWithContentsOfFile:bgPath] : [UIImage imageNamed:@"launcher_bg"];
+	if (!bgPath) bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"PNG"];
+	UIImage *bgImage = bgPath ? [UIImage imageWithContentsOfFile:bgPath] : nil;
 	
-	if(bgImage) {
+	if (bgImage) {
 		UIImageView *bgView = [[UIImageView alloc] initWithImage:bgImage];
 		bgView.frame = self.view.bounds;
 		bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -107,99 +94,123 @@ const char *IOS_GetExecDir(void)
 		bgView.clipsToBounds = YES;
 		[self.view insertSubview:bgView atIndex:0];
 	} else {
-		self.view.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
+		self.view.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.15 alpha:1.0];
 	}
 	
-	// Safe Logo Loading
+	// 2. Лого + Назва додатка
+	CGFloat currentX = 15.0;
 	NSString *logoPath = [[NSBundle mainBundle] pathForResource:@"logo" ofType:@"png"];
-	UIImage *logoImg = logoPath ? [UIImage imageWithContentsOfFile:logoPath] : [UIImage imageNamed:@"logo"];
+	if (!logoPath) logoPath = [[NSBundle mainBundle] pathForResource:@"logo" ofType:@"PNG"];
+	UIImage *logoImg = logoPath ? [UIImage imageWithContentsOfFile:logoPath] : nil;
 	
-	if(logoImg) {
+	if (logoImg) {
 		UIImageView *logoView = [[UIImageView alloc] initWithImage:logoImg];
-		logoView.frame = CGRectMake(15, 20, 65, 65);
+		logoView.frame = CGRectMake(currentX, 15, 45, 45);
 		logoView.contentMode = UIViewContentModeScaleAspectFit;
 		[self.view addSubview:logoView];
-	} else {
-		UILabel *logoLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, 120, 30)];
-		logoLabel.text = @"HL2SB+++";
-		logoLabel.font = [UIFont boldSystemFontOfSize:16];
-		logoLabel.textColor = [UIColor whiteColor];
-		[self.view addSubview:logoLabel];
+		currentX += 55.0;
 	}
+	
+	UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(currentX, 15, 300, 45)];
+	titleLabel.text = @"HL2SB+++";
+	titleLabel.textColor = [UIColor whiteColor];
+	
+	UIFont *customFont = [UIFont fontWithName:@"AppleSDGothicNeo-SemiBold" size:22.0];
+	if (!customFont) {
+		customFont = [UIFont systemFontOfSize:22.0 weight:UIFontWeightSemibold];
+	}
+	titleLabel.font = customFont;
+	[self.view addSubview:titleLabel];
 
-	// Settings button (top right)
-	UIButton *settingsBtn = [[UIButton alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 60, 20, 50, 50)];
+	// Кнопка налаштувань
+	UIButton *settingsBtn = [[UIButton alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 50, 15, 40, 40)];
 	[settingsBtn setTitle:@"⚙" forState:UIControlStateNormal];
-	[settingsBtn.titleLabel setFont:[UIFont systemFontOfSize:30]];
+	[settingsBtn.titleLabel setFont:[UIFont systemFontOfSize:26]];
 	[settingsBtn addTarget:self action:@selector(showSettings) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:settingsBtn];
 	
-	// Main content centered
-	CGFloat centerY = self.view.bounds.size.height / 2 - 70;
+	// 3. Побудова картки з кнопками
+	[self rebuildCardView];
+}
+
+- (void)rebuildCardView
+{
+	// Зберігаємо поточний введений текст перед перебудовою
+	if (argsTextField) savedArgsText = argsTextField.text;
+	if (suffixTextField) savedSuffixText = suffixTextField.text;
 	
-	// Command-line arguments label
-	UILabel *argsLabel = [[UILabel alloc] initWithFrame:CGRectMake(30, centerY, 300, 25)];
+	if (cardView) {
+		[cardView removeFromSuperview];
+	}
+	
+	CGFloat cardWidth = 340;
+	CGFloat btnHeight = g_buttonSize; // Використовуємо g_buttonSize зі слайдера!
+	CGFloat contentHeight = g_devMode ? 145 : 80;
+	CGFloat cardHeight = contentHeight + btnHeight;
+	
+	cardView = [[UIView alloc] initWithFrame:CGRectMake((self.view.bounds.size.width - cardWidth) / 2, (self.view.bounds.size.height - cardHeight) / 2, cardWidth, cardHeight)];
+	cardView.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.35];
+	cardView.layer.cornerRadius = 14;
+	cardView.clipsToBounds = YES;
+	cardView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+	[self.view addSubview:cardView];
+	
+	// Arguments label
+	UILabel *argsLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, cardWidth - 30, 20)];
 	argsLabel.text = @"Command-line arguments:";
-	argsLabel.font = [UIFont systemFontOfSize:14];
-	argsLabel.textColor = [UIColor whiteColor];
-	[self.view addSubview:argsLabel];
+	argsLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+	argsLabel.textColor = [UIColor blackColor];
+	[cardView addSubview:argsLabel];
 	
-	// Command-line arguments textfield
-	argsTextField = [[UITextField alloc] initWithFrame:CGRectMake(30, centerY + 30, self.view.bounds.size.width - 60, 45)];
+	// Arguments TextField
+	argsTextField = [[UITextField alloc] initWithFrame:CGRectMake(15, 32, cardWidth - 30, 36)];
 	argsTextField.placeholder = @"-game hl2sbpp";
-	argsTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.85];
+	argsTextField.text = savedArgsText;
+	argsTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.4];
 	argsTextField.textColor = [UIColor blackColor];
-	argsTextField.layer.cornerRadius = 8;
-	argsTextField.layer.borderColor = [UIColor colorWithRed:0.8 green:0.8 blue:0.8 alpha:1.0].CGColor;
-	argsTextField.layer.borderWidth = 1.0;
-	argsTextField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 0)];
+	argsTextField.font = [UIFont systemFontOfSize:14];
+	argsTextField.layer.cornerRadius = 6;
+	argsTextField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 0)];
 	argsTextField.leftViewMode = UITextFieldViewModeAlways;
 	argsTextField.delegate = self;
-	[self.view addSubview:argsTextField];
+	[cardView addSubview:argsTextField];
 	
-	// Library suffix container (hidden until dev mode)
-	suffixContainer = [[UIView alloc] initWithFrame:CGRectMake(30, centerY + 85, self.view.bounds.size.width - 60, 80)];
-	suffixContainer.hidden = !g_devMode;
+	// Dev Mode suffix block
+	if (g_devMode) {
+		UILabel *suffixLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 75, cardWidth - 30, 20)];
+		suffixLabel.text = @"Library suffix:";
+		suffixLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+		suffixLabel.textColor = [UIColor blackColor];
+		[cardView addSubview:suffixLabel];
+		
+		suffixTextField = [[UITextField alloc] initWithFrame:CGRectMake(15, 97, cardWidth - 30, 36)];
+		suffixTextField.text = savedSuffixText;
+		suffixTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.4];
+		suffixTextField.textColor = [UIColor blackColor];
+		suffixTextField.font = [UIFont systemFontOfSize:14];
+		suffixTextField.layer.cornerRadius = 6;
+		suffixTextField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 0)];
+		suffixTextField.leftViewMode = UITextFieldViewModeAlways;
+		suffixTextField.delegate = self;
+		[cardView addSubview:suffixTextField];
+	}
 	
-	UILabel *suffixLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 150, 25)];
-	suffixLabel.text = @"Library suffix:";
-	suffixLabel.font = [UIFont systemFontOfSize:14];
-	suffixLabel.textColor = [UIColor whiteColor];
-	[suffixContainer addSubview:suffixLabel];
+	// Кнопки Exit та Start
+	CGFloat btnWidth = cardWidth / 2;
 	
-	suffixTextField = [[UITextField alloc] initWithFrame:CGRectMake(0, 30, suffixContainer.bounds.size.width, 45)];
-	suffixTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.85];
-	suffixTextField.textColor = [UIColor blackColor];
-	suffixTextField.layer.cornerRadius = 8;
-	suffixTextField.layer.borderColor = [UIColor colorWithRed:0.8 green:0.8 blue:0.8 alpha:1.0].CGColor;
-	suffixTextField.layer.borderWidth = 1.0;
-	suffixTextField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 0)];
-	suffixTextField.leftViewMode = UITextFieldViewModeAlways;
-	suffixTextField.delegate = self;
-	[suffixContainer addSubview:suffixTextField];
-	
-	[self.view addSubview:suffixContainer];
-	
-	// Exit button (red)
-	UIButton *exitBtn = [[UIButton alloc] initWithFrame:CGRectMake(30, centerY + 170, (self.view.bounds.size.width - 60) / 2 - 7, g_buttonSize)];
+	UIButton *exitBtn = [[UIButton alloc] initWithFrame:CGRectMake(0, cardHeight - btnHeight, btnWidth, btnHeight)];
 	[exitBtn setTitle:@"Exit" forState:UIControlStateNormal];
-	[exitBtn setBackgroundColor:[UIColor colorWithRed:0.9 green:0.2 blue:0.2 alpha:0.9]];
-	[exitBtn.titleLabel setFont:[UIFont boldSystemFontOfSize:16]];
-	exitBtn.layer.cornerRadius = 8;
+	[exitBtn setBackgroundColor:[UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:0.65]];
+	[exitBtn.titleLabel setFont:[UIFont systemFontOfSize:15 weight:UIFontWeightMedium]];
 	[exitBtn addTarget:self action:@selector(exitPressed) forControlEvents:UIControlEventTouchUpInside];
-	[self.view addSubview:exitBtn];
+	[cardView addSubview:exitBtn];
 	
-	// Start button (green)
-	UIButton *startBtn = [[UIButton alloc] initWithFrame:CGRectMake(30 + (self.view.bounds.size.width - 60) / 2 + 7, centerY + 170, (self.view.bounds.size.width - 60) / 2 - 7, g_buttonSize)];
+	UIButton *startBtn = [[UIButton alloc] initWithFrame:CGRectMake(btnWidth, cardHeight - btnHeight, btnWidth, btnHeight)];
 	[startBtn setTitle:@"Start" forState:UIControlStateNormal];
-	[startBtn setBackgroundColor:[UIColor colorWithRed:0.2 green:0.8 blue:0.2 alpha:0.9]];
-	[startBtn.titleLabel setFont:[UIFont boldSystemFontOfSize:16]];
-	startBtn.layer.cornerRadius = 8;
+	[startBtn setBackgroundColor:[UIColor colorWithRed:0.2 green:0.9 blue:0.3 alpha:0.65]];
+	[startBtn.titleLabel setFont:[UIFont systemFontOfSize:15 weight:UIFontWeightMedium]];
 	[startBtn addTarget:self action:@selector(startPressed) forControlEvents:UIControlEventTouchUpInside];
-	[self.view addSubview:startBtn];
-	
-	// Load settings
-	[self loadSettings];
+	[cardView addSubview:startBtn];
 }
 
 - (void)dismissKeyboard
@@ -226,18 +237,16 @@ const char *IOS_GetExecDir(void)
 	if(settingsfile && (fread(&settings, sizeof(settings), 1, settingsfile) == 1) && (settings.magic == SETTINGS_MAGIC)) {
 		settings.args[1023] = 0;
 		settings.suffix[31] = 0;
-		[argsTextField setText:@(settings.args)];
-		[suffixTextField setText:@(settings.suffix)];
+		savedArgsText = @(settings.args);
+		savedSuffixText = @(settings.suffix);
 		g_devMode = settings.devMode != 0;
-		g_buttonSize = settings.buttonSize > 0 ? settings.buttonSize : 60;
+		g_buttonSize = (settings.buttonSize >= 30 && settings.buttonSize <= 90) ? settings.buttonSize : 45;
 		fclose(settingsfile);
 	} else {
-		[argsTextField setText:@"-game hl2sbpp"];
+		savedArgsText = @"-game hl2sbpp";
 		g_devMode = false;
-		g_buttonSize = 60;
+		g_buttonSize = 45;
 	}
-	
-	suffixContainer.hidden = !g_devMode;
 }
 
 - (void)saveSettings
@@ -251,7 +260,7 @@ const char *IOS_GetExecDir(void)
 	if(settingsfile) {
 		settings_t settings;
 		strlcpy(settings.args, [argsTextField.text UTF8String], 1024);
-		strlcpy(settings.suffix, [suffixTextField.text UTF8String], 32);
+		strlcpy(settings.suffix, [suffixTextField.text ? suffixTextField.text : @"" UTF8String], 32);
 		settings.magic = SETTINGS_MAGIC;
 		settings.devMode = g_devMode ? 1 : 0;
 		settings.buttonSize = g_buttonSize;
@@ -280,13 +289,13 @@ const char *IOS_GetExecDir(void)
 	
 	// Button Size slider
 	UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 50, 150, 20)];
-	sliderLabel.text = @"Button Size";
+	sliderLabel.text = @"Button Height";
 	sliderLabel.font = [UIFont systemFontOfSize:14];
 	[customVC.view addSubview:sliderLabel];
 	
 	buttonSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(10, 75, 220, 20)];
-	buttonSizeSlider.minimumValue = 40;
-	buttonSizeSlider.maximumValue = 100;
+	buttonSizeSlider.minimumValue = 35; // Мінімальна висота кнопок
+	buttonSizeSlider.maximumValue = 80; // Максимальна висота кнопок
 	buttonSizeSlider.value = g_buttonSize;
 	[customVC.view addSubview:buttonSizeSlider];
 	
@@ -295,7 +304,7 @@ const char *IOS_GetExecDir(void)
 	UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"Done" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
 		g_buttonSize = (int)buttonSizeSlider.value;
 		[self saveSettings];
-		suffixContainer.hidden = !g_devMode;
+		[self rebuildCardView]; // ПЕРЕБУДОВУЄМО КАРТКУ ТА КНОПКИ З НОВИМ РОЗМІРОМ
 	}];
 	
 	[settingsAlert addAction:okAction];
@@ -318,7 +327,6 @@ const char *IOS_GetExecDir(void)
 	[self saveSettings];
 	_shouldStart = YES;
 	
-	// Setup args
 	NSArray *argv = [argsTextField.text componentsSeparatedByString:@" "];
 	int count = [argv count];
 	szArgv = calloc(count + 2, sizeof(char*));
@@ -331,20 +339,15 @@ const char *IOS_GetExecDir(void)
 	szArgv[count + 1] = 0;
 	szArgv[0] = strdup(IOS_GetExecDir());
 	
-	// Stop runloop
 	CFRunLoopStop(CFRunLoopGetCurrent());
 }
 
 @end
 
-void IOS_PrepareView(void)
-{
-	// Stub for compatibility
-}
+void IOS_PrepareView(void) {}
 
 void IOS_LaunchDialog(void)
 {
-	NSLog(@"System Version is %@",[[UIDevice currentDevice] systemVersion]);
 	NSString *ver = [[UIDevice currentDevice] systemVersion];
 	g_iOSVer = [ver floatValue];
 
