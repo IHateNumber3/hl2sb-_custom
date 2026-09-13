@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
-APP_NAME="${IOS_APP_NAME:-Portal}"
-BUNDLE_ID="${IOS_BUNDLE_ID:-com.sourceengine.portal}"
+APP_NAME="${IOS_APP_NAME:-HL2SB+++MOD}"
+BUNDLE_ID="${IOS_BUNDLE_ID:-com.sourceengine.custom}"
 BUNDLE_VERSION="${IOS_BUNDLE_VERSION:-1.0.0}"
 BUILD_NUMBER="${IOS_BUILD_NUMBER:-1}"
 MIN_OS="${IOS_MIN_VERSION:-12.0}"
