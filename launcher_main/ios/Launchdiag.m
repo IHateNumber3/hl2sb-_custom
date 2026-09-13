@@ -90,48 +90,52 @@ const char *IOS_GetExecDir(void)
 {
 	[super viewDidLoad];
 	
-	// Set background image
-	UIImage *bgImage = [UIImage imageNamed:@"launcher_bg"];
-	if(!bgImage) {
-		bgImage = [UIImage imageNamed:@"launcher_bg.png"];
-	}
+	// Tap gesture to dismiss keyboard
+	UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
+	tap.cancelsTouchesInView = NO;
+	[self.view addGestureRecognizer:tap];
+	
+	// Safe Background Loading
+	NSString *bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"png"];
+	UIImage *bgImage = bgPath ? [UIImage imageWithContentsOfFile:bgPath] : [UIImage imageNamed:@"launcher_bg"];
+	
 	if(bgImage) {
 		UIImageView *bgView = [[UIImageView alloc] initWithImage:bgImage];
 		bgView.frame = self.view.bounds;
+		bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 		bgView.contentMode = UIViewContentModeScaleAspectFill;
+		bgView.clipsToBounds = YES;
 		[self.view insertSubview:bgView atIndex:0];
 	} else {
-		self.view.backgroundColor = [UIColor colorWithRed:0.3 green:0.5 blue:0.3 alpha:1.0];
+		self.view.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
 	}
 	
-	// Logo Image + MODDED (top left)
-	UIImage *logoImg = [UIImage imageNamed:@"logo.png"];
+	// Safe Logo Loading
+	NSString *logoPath = [[NSBundle mainBundle] pathForResource:@"logo" ofType:@"png"];
+	UIImage *logoImg = logoPath ? [UIImage imageWithContentsOfFile:logoPath] : [UIImage imageNamed:@"logo"];
+	
 	if(logoImg) {
 		UIImageView *logoView = [[UIImageView alloc] initWithImage:logoImg];
-		// Налаштовуємо позицію та розмір під верхній лівий кут
-		logoView.frame = CGRectMake(10, 10, 60, 60);
+		logoView.frame = CGRectMake(15, 20, 65, 65);
 		logoView.contentMode = UIViewContentModeScaleAspectFit;
 		[self.view addSubview:logoView];
 	} else {
-		// Резервний варіант, якщо logo.png відсутній
-		UILabel *logoLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, 100, 25)];
+		UILabel *logoLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 20, 120, 30)];
 		logoLabel.text = @"HL2SB+++";
 		logoLabel.font = [UIFont boldSystemFontOfSize:16];
 		logoLabel.textColor = [UIColor whiteColor];
 		[self.view addSubview:logoLabel];
 	}
 
-	
 	// Settings button (top right)
-	UIButton *settingsBtn = [[UIButton alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 60, 40, 50, 50)];
+	UIButton *settingsBtn = [[UIButton alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 60, 20, 50, 50)];
 	[settingsBtn setTitle:@"⚙" forState:UIControlStateNormal];
 	[settingsBtn.titleLabel setFont:[UIFont systemFontOfSize:30]];
 	[settingsBtn addTarget:self action:@selector(showSettings) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:settingsBtn];
 	
 	// Main content centered
-	CGFloat centerY = self.view.bounds.size.height / 2 - 80;
-	CGFloat centerX = self.view.bounds.size.width / 2;
+	CGFloat centerY = self.view.bounds.size.height / 2 - 70;
 	
 	// Command-line arguments label
 	UILabel *argsLabel = [[UILabel alloc] initWithFrame:CGRectMake(30, centerY, 300, 25)];
@@ -143,7 +147,8 @@ const char *IOS_GetExecDir(void)
 	// Command-line arguments textfield
 	argsTextField = [[UITextField alloc] initWithFrame:CGRectMake(30, centerY + 30, self.view.bounds.size.width - 60, 45)];
 	argsTextField.placeholder = @"-game hl2sbpp";
-	argsTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.9];
+	argsTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.85];
+	argsTextField.textColor = [UIColor blackColor];
 	argsTextField.layer.cornerRadius = 8;
 	argsTextField.layer.borderColor = [UIColor colorWithRed:0.8 green:0.8 blue:0.8 alpha:1.0].CGColor;
 	argsTextField.layer.borderWidth = 1.0;
@@ -163,7 +168,8 @@ const char *IOS_GetExecDir(void)
 	[suffixContainer addSubview:suffixLabel];
 	
 	suffixTextField = [[UITextField alloc] initWithFrame:CGRectMake(0, 30, suffixContainer.bounds.size.width, 45)];
-	suffixTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.9];
+	suffixTextField.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.85];
+	suffixTextField.textColor = [UIColor blackColor];
 	suffixTextField.layer.cornerRadius = 8;
 	suffixTextField.layer.borderColor = [UIColor colorWithRed:0.8 green:0.8 blue:0.8 alpha:1.0].CGColor;
 	suffixTextField.layer.borderWidth = 1.0;
@@ -177,7 +183,7 @@ const char *IOS_GetExecDir(void)
 	// Exit button (red)
 	UIButton *exitBtn = [[UIButton alloc] initWithFrame:CGRectMake(30, centerY + 170, (self.view.bounds.size.width - 60) / 2 - 7, g_buttonSize)];
 	[exitBtn setTitle:@"Exit" forState:UIControlStateNormal];
-	[exitBtn setBackgroundColor:[UIColor colorWithRed:1.0 green:0.2 alpha:0.2 alpha:1.0]];
+	[exitBtn setBackgroundColor:[UIColor colorWithRed:0.9 green:0.2 blue:0.2 alpha:0.9]];
 	[exitBtn.titleLabel setFont:[UIFont boldSystemFontOfSize:16]];
 	exitBtn.layer.cornerRadius = 8;
 	[exitBtn addTarget:self action:@selector(exitPressed) forControlEvents:UIControlEventTouchUpInside];
@@ -186,7 +192,7 @@ const char *IOS_GetExecDir(void)
 	// Start button (green)
 	UIButton *startBtn = [[UIButton alloc] initWithFrame:CGRectMake(30 + (self.view.bounds.size.width - 60) / 2 + 7, centerY + 170, (self.view.bounds.size.width - 60) / 2 - 7, g_buttonSize)];
 	[startBtn setTitle:@"Start" forState:UIControlStateNormal];
-	[startBtn setBackgroundColor:[UIColor colorWithRed:0.2 green:0.8 alpha:0.2 alpha:1.0]];
+	[startBtn setBackgroundColor:[UIColor colorWithRed:0.2 green:0.8 blue:0.2 alpha:0.9]];
 	[startBtn.titleLabel setFont:[UIFont boldSystemFontOfSize:16]];
 	startBtn.layer.cornerRadius = 8;
 	[startBtn addTarget:self action:@selector(startPressed) forControlEvents:UIControlEventTouchUpInside];
@@ -194,6 +200,17 @@ const char *IOS_GetExecDir(void)
 	
 	// Load settings
 	[self loadSettings];
+}
+
+- (void)dismissKeyboard
+{
+	[self.view endEditing:YES];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField
+{
+	[textField resignFirstResponder];
+	return YES;
 }
 
 - (void)loadSettings
@@ -245,42 +262,35 @@ const char *IOS_GetExecDir(void)
 
 - (void)showSettings
 {
-	UIAlertController *settingsAlert = [UIAlertController alertControllerWithTitle:@"Settings" message:@"" preferredStyle:UIAlertControllerStyleAlert];
+	UIAlertController *settingsAlert = [UIAlertController alertControllerWithTitle:@"Settings" message:@"\n\n\n\n\n" preferredStyle:UIAlertControllerStyleAlert];
+	
+	UIViewController *customVC = [[UIViewController alloc] init];
+	customVC.preferredContentSize = CGSizeMake(270, 120);
 	
 	// Developer Mode switch
-	[settingsAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-		textField.hidden = YES;
-	}];
-	
-	UIView *switchContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 270, 60)];
-	UILabel *devLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, 150, 30)];
+	UILabel *devLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 10, 150, 30)];
 	devLabel.text = @"Developer Mode";
 	devLabel.font = [UIFont systemFontOfSize:14];
-	[switchContainer addSubview:devLabel];
+	[customVC.view addSubview:devLabel];
 	
-	devModeSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(220, 15, 50, 30)];
+	devModeSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(180, 10, 50, 30)];
 	devModeSwitch.on = g_devMode;
 	[devModeSwitch addTarget:self action:@selector(devModeChanged:) forControlEvents:UIControlEventValueChanged];
-	[switchContainer addSubview:devModeSwitch];
-	
-	[settingsAlert.view addSubview:switchContainer];
+	[customVC.view addSubview:devModeSwitch];
 	
 	// Button Size slider
-	UIView *sliderContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 60, 270, 60)];
-	UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 15, 150, 30)];
+	UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 50, 150, 20)];
 	sliderLabel.text = @"Button Size";
 	sliderLabel.font = [UIFont systemFontOfSize:14];
-	[sliderContainer addSubview:sliderLabel];
+	[customVC.view addSubview:sliderLabel];
 	
-	buttonSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(20, 45, 230, 20)];
+	buttonSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(10, 75, 220, 20)];
 	buttonSizeSlider.minimumValue = 40;
 	buttonSizeSlider.maximumValue = 100;
 	buttonSizeSlider.value = g_buttonSize;
-	[sliderContainer addSubview:buttonSizeSlider];
+	[customVC.view addSubview:buttonSizeSlider];
 	
-	[settingsAlert.view addSubview:sliderContainer];
-	
-	settingsAlert.preferredContentSize = CGSizeMake(270, 130);
+	[settingsAlert setValue:customVC forKey:@"contentViewController"];
 	
 	UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"Done" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
 		g_buttonSize = (int)buttonSizeSlider.value;
