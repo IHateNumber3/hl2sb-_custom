@@ -290,7 +290,7 @@ const char *IOS_GetExecDir(void)
 	
 	// BG: SET button
 	UIButton *bgButton = [[UIButton alloc] initWithFrame:CGRectMake(10, 10, 250, 35)];
-	[bgButton setTitle:@"BG: SET" forState:UIControlStateNormal];
+	[bgButton setTitle:@"SET BACKGROUND" forState:UIControlStateNormal];
 	[bgButton setBackgroundColor:[UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:0.7]];
 	bgButton.layer.cornerRadius = 6;
 	[bgButton.titleLabel setFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
