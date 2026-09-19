@@ -1,5 +1,5 @@
 /*
- Launchdialog.m - iOS launch dialog with dynamic button sizing, transparent UI, and background selection
+ Launchdialog.m - iOS launch dialog with dynamic button sizing, transparent UI, and custom elements customization
  */
 
 #import <Foundation/Foundation.h>
@@ -15,10 +15,21 @@ float g_iOSVer;
 bool isdark;
 int g_buttonSize = 45;
 bool g_devMode = false;
-bool g_customUnlocked = false; // Флаг розблокування кастомізації за кодом
+bool g_customUnlocked = false; // Прапорець розблокування кастомізації
 bool g_shouldStart = false;
 
-#define SETTINGS_MAGIC 112 // Оновили магічне число, щоб структура підхопила новий прапорець
+// Структура для кастомного елемента
+typedef struct custom_element_s
+{
+	char title[64];
+	int type; // 0 - кнопка, 1 - світчер
+	int value;
+} custom_element_t;
+
+int g_customElementCount = 0;
+custom_element_t g_customElements[10];
+
+#define SETTINGS_MAGIC 113 // Оновлене магічне число для нової структури з кастомними елементами
 
 typedef struct settings_s
 {
@@ -30,6 +41,8 @@ typedef struct settings_s
 	unsigned int devMode;
 	unsigned int buttonSize;
 	unsigned int customUnlocked;
+	int customElementCount;
+	custom_element_t customElements[10];
 } settings_t;
 
 const char *IOS_GetDocsDir(void)
@@ -250,12 +263,19 @@ const char *IOS_GetExecDir(void)
 		g_devMode = settings.devMode != 0;
 		g_buttonSize = (settings.buttonSize >= 30 && settings.buttonSize <= 90) ? settings.buttonSize : 45;
 		g_customUnlocked = settings.customUnlocked != 0;
+		
+		g_customElementCount = (settings.customElementCount >= 0 && settings.customElementCount <= 10) ? settings.customElementCount : 0;
+		for(int i = 0; i < g_customElementCount; i++) {
+			g_customElements[i] = settings.customElements[i];
+		}
+		
 		fclose(settingsfile);
 	} else {
 		savedArgsText = @"-game hl2sbpp";
 		g_devMode = false;
 		g_buttonSize = 45;
 		g_customUnlocked = false;
+		g_customElementCount = 0;
 	}
 }
 
@@ -268,13 +288,19 @@ const char *IOS_GetExecDir(void)
 	
 	FILE *settingsfile = fopen(settingspath, "wb");
 	if(settingsfile) {
-		settings_t settings;
+		settings_t settings = {0};
 		strlcpy(settings.args, [argsTextField.text UTF8String], 1024);
 		strlcpy(settings.suffix, [suffixTextField.text ? suffixTextField.text : @"" UTF8String], 32);
 		settings.magic = SETTINGS_MAGIC;
 		settings.devMode = g_devMode ? 1 : 0;
 		settings.buttonSize = g_buttonSize;
 		settings.customUnlocked = g_customUnlocked ? 1 : 0;
+		
+		settings.customElementCount = g_customElementCount;
+		for(int i = 0; i < g_customElementCount; i++) {
+			settings.customElements[i] = g_customElements[i];
+		}
+		
 		fwrite(&settings, sizeof(settings), 1, settingsfile);
 		fclose(settingsfile);
 	}
@@ -284,17 +310,16 @@ const char *IOS_GetExecDir(void)
 {
 	UIAlertController *settingsAlert = [UIAlertController alertControllerWithTitle:@"Settings" message:@"\n\n\n\n\n\n" preferredStyle:UIAlertControllerStyleAlert];
 	
-	// Контейнер з підтримкою скролу (UIScrollView), щоб вміст не різався
 	UIViewController *customVC = [[UIViewController alloc] init];
-	customVC.preferredContentSize = CGSizeMake(270, 200); // Фіксована видима зона вікна
+	customVC.preferredContentSize = CGSizeMake(270, 220);
 	
-	UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, 270, 200)];
+	UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, 270, 220)];
 	scrollView.showsVerticalScrollIndicator = YES;
 	[customVC.view addSubview:scrollView];
 	
 	CGFloat currentY = 10;
 	
-	// 1. Кнопка зміни фону (завжди доступна)
+	// 1. Кнопка зміни фону
 	UIButton *bgButton = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
 	[bgButton setTitle:@"BG: SET" forState:UIControlStateNormal];
 	[bgButton setBackgroundColor:[UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:0.7]];
@@ -304,18 +329,31 @@ const char *IOS_GetExecDir(void)
 	[scrollView addSubview:bgButton];
 	currentY += 45;
 	
-	// 2. Якщо кастомізація розблокована — показуємо нову кнопку (або елемент)
+	// 2. Блок кастомізації (якщо розблоковано) або кнопка введення коду
 	if (g_customUnlocked) {
-		UIButton *customElementBtn = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
-		[customElementBtn setTitle:@"Custom Element Settings" forState:UIControlStateNormal];
-		[customElementBtn setBackgroundColor:[UIColor colorWithRed:0.8 green:0.4 blue:0.1 alpha:0.8]];
-		customElementBtn.layer.cornerRadius = 6;
-		[customElementBtn.titleLabel setFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
-		[customElementBtn addTarget:self action:@selector(customElementAction) forControlEvents:UIControlEventTouchUpInside];
-		[scrollView addSubview:customElementBtn];
-		currentY += 45;
+		for (int i = 0; i < g_customElementCount; i++) {
+			UIButton *elemBtn = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
+			NSString *btnTitle = [NSString stringWithUTF8String:g_customElements[i].title];
+			[elemBtn setTitle:btnTitle forState:UIControlStateNormal];
+			[elemBtn setBackgroundColor:[UIColor colorWithRed:0.8 green:0.4 blue:0.1 alpha:0.8]];
+			elemBtn.layer.cornerRadius = 6;
+			[elemBtn.titleLabel setFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
+			elemBtn.tag = i;
+			[elemBtn addTarget:self action:@selector(customElementTapped:) forControlEvents:UIControlEventTouchUpInside];
+			[scrollView addSubview:elemBtn];
+			currentY += 45;
+		}
+		
+		UIButton *addElemBtn = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 30)];
+		[addElemBtn setTitle:@"+ Add Custom Element" forState:UIControlStateNormal];
+		[addElemBtn setBackgroundColor:[UIColor colorWithRed:0.2 green:0.7 blue:0.3 alpha:0.8]];
+		addElemBtn.layer.cornerRadius = 6;
+		[addElemBtn.titleLabel setFont:[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]];
+		[addElemBtn addTarget:self action:@selector(addNewCustomElementPrompt) forControlEvents:UIControlEventTouchUpInside];
+		[scrollView addSubview:addElemBtn];
+		currentY += 40;
+		
 	} else {
-		// Кнопка введення секретного коду для розблокування
 		UIButton *unlockBtn = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
 		[unlockBtn setTitle:@"Create new element customisation" forState:UIControlStateNormal];
 		[unlockBtn setBackgroundColor:[UIColor colorWithRed:0.5 green:0.5 blue:0.5 alpha:0.6]];
@@ -352,7 +390,6 @@ const char *IOS_GetExecDir(void)
 	[scrollView addSubview:buttonSizeSlider];
 	currentY += 35;
     
-	// Встановлюємо загальну область прокрутки (contentSize), щоб скролер знав, де кінець
 	scrollView.contentSize = CGSizeMake(270, currentY);
 	
 	[settingsAlert setValue:customVC forKey:@"contentViewController"];
@@ -367,10 +404,8 @@ const char *IOS_GetExecDir(void)
 	[self presentViewController:settingsAlert animated:YES completion:nil];
 }
 
-// Запит секретного коду
 - (void)promptForUnlockCode:(id)sender
 {
-	// Закриваємо поточне вікно налаштувань перед відкриттям іншого алерту
 	UIViewController *presentedController = self.presentedViewController;
 	[presentedController dismissViewControllerAnimated:YES completion:^{
 		
@@ -378,24 +413,21 @@ const char *IOS_GetExecDir(void)
 		
 		[codeAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
 			textField.placeholder = @"Secret code...";
-			textField.secureTextEntry = YES; // Можна приховати символи, якщо хочеш
+			textField.secureTextEntry = YES;
 		}];
 		
 		UIAlertAction *submitAction = [UIAlertAction actionWithTitle:@"Unlock" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
 			UITextField *textField = codeAlert.textFields.firstObject;
 			NSString *enteredCode = textField.text;
 			
-			// ЗАДАЙ СВІЙ СЕКРЕТНИЙ КОД ТУТ (наприклад: "1234" або "shiza")
 			if ([enteredCode isEqualToString:@"shiza"]) {
 				g_customUnlocked = YES;
 				[self saveSettings];
 				
-				// Показуємо сповіщення про успіх
 				UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Success!" message:@"New customisation unlocked!" preferredStyle:UIAlertControllerStyleAlert];
 				[successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
 				[self presentViewController:successAlert animated:YES completion:nil];
 			} else {
-				// Помилка коду
 				UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Error" message:@"Wrong code!" preferredStyle:UIAlertControllerStyleAlert];
 				[errorAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
 				[self presentViewController:errorAlert animated:YES completion:nil];
@@ -411,13 +443,49 @@ const char *IOS_GetExecDir(void)
 	}];
 }
 
-// Дія для нової розблокованої кнопки кастомізації
-- (void)customElementAction
+- (void)addNewCustomElementPrompt
 {
 	UIViewController *presentedController = self.presentedViewController;
 	[presentedController dismissViewControllerAnimated:YES completion:^{
-		UIAlertController *infoAlert = [UIAlertController alertControllerWithTitle:@"Customisation" message:@"Here you can add your custom element configuration!" preferredStyle:UIAlertControllerStyleAlert];
-		[infoAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+		
+		UIAlertController *promptAlert = [UIAlertController alertControllerWithTitle:@"New Custom Element" message:@"Enter element name:" preferredStyle:UIAlertControllerStyleAlert];
+		
+		[promptAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+			textField.placeholder = @"Element Name...";
+		}];
+		
+		UIAlertAction *createAction = [UIAlertAction actionWithTitle:@"Create" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+			UITextField *textField = promptAlert.textFields.firstObject;
+			if (textField.text.length > 0 && g_customElementCount < 10) {
+				strlcpy(g_customElements[g_customElementCount].title, [textField.text UTF8String], 64);
+				g_customElements[g_customElementCount].type = 0;
+				g_customElements[g_customElementCount].value = 0;
+				g_customElementCount++;
+				
+				[self saveSettings];
+			}
+			[self showSettings];
+		}];
+		
+		[promptAlert addAction:createAction];
+		[promptAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+			[self showSettings];
+		}]];
+		
+		[self presentViewController:promptAlert animated:YES completion:nil];
+	}];
+}
+
+- (void)customElementTapped:(UIButton *)sender
+{
+	int index = (int)sender.tag;
+	
+	UIViewController *presentedController = self.presentedViewController;
+	[presentedController dismissViewControllerAnimated:YES completion:^{
+		UIAlertController *infoAlert = [UIAlertController alertControllerWithTitle:@"Custom Element" message:[NSString stringWithFormat:@"You clicked: %s", g_customElements[index].title] preferredStyle:UIAlertControllerStyleAlert];
+		[infoAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+			[self showSettings];
+		}]];
 		[self presentViewController:infoAlert animated:YES completion:nil];
 	}];
 }
