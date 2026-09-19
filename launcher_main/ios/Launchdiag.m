@@ -18,12 +18,12 @@ bool g_devMode = false;
 bool g_customUnlocked = false;
 bool g_shouldStart = false;
 
-// Структура для кастомного елемента
+// Структура для кастомного елемента (зберігає назву, колір та Lua-код)
 typedef struct custom_element_s
 {
 	char title[64];
-	int type; // 0 - помаранчевий, 1 - зелений, 2 - синій
-	int value;
+	int type;             // 0 - помаранчевий, 1 - зелений, 2 - синій
+	char actionCode[256]; // Код, який виконується при натисканні
 } custom_element_t;
 
 int g_customElementCount = 0;
@@ -449,51 +449,67 @@ const char *IOS_GetExecDir(void)
 	}];
 }
 
+// Повноцінне вікно створення кнопки з трьома полями (як ти і просив)
 - (void)addNewCustomElementPrompt
 {
 	UIViewController *presentedController = self.presentedViewController;
 	[presentedController dismissViewControllerAnimated:YES completion:^{
 		
-		UIAlertController *promptAlert = [UIAlertController alertControllerWithTitle:@"Custom Code Element" message:@"Введи код, напр.: SuperMod | green" preferredStyle:UIAlertControllerStyleAlert];
+		UIAlertController *promptAlert = [UIAlertController alertControllerWithTitle:@"Створити кастомну кнопку" 
+																			 message:@"Введіть параметри нової елемент-кнопки" 
+																	  preferredStyle:UIAlertControllerStyleAlert];
 		
+		// 1. Поле для імені кнопки
 		[promptAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-			textField.placeholder = @"Назва | green (або blue)";
+			textField.placeholder = @"Ім'я кнопки (напр. Змінити фон)";
 		}];
 		
-		UIAlertAction *createAction = [UIAlertAction actionWithTitle:@"Compile" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-			UITextField *textField = promptAlert.textFields.firstObject;
-			NSString *inputCode = textField.text;
+		// 2. Поле для вибору кольору
+		[promptAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+			textField.placeholder = @"Колір (green, blue або orange)";
+		}];
+		
+		// 3. Поле для введення Lua/коду виконання з готовим прикладом
+		[promptAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+			textField.placeholder = @"Код виконання";
+			textField.text = @"bgView.backgroundColor = [UIColor redColor];";
+		}];
+		
+		UIAlertAction *createAction = [UIAlertAction actionWithTitle:@"Створити" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+			UITextField *nameField = promptAlert.textFields[0];
+			UITextField *colorField = promptAlert.textFields[1];
+			UITextField *codeField = promptAlert.textFields[2];
 			
-			if (inputCode.length > 0 && g_customElementCount < 10) {
-				NSArray *parts = [inputCode componentsSeparatedByString:@"|"];
-				
-				char titleBuf[64] = "Custom Button";
+			NSString *btnName = nameField.text;
+			NSString *btnColor = [colorField.text lowercaseString];
+			NSString *btnCode = codeField.text;
+			
+			if (btnName.length > 0 && g_customElementCount < 10) {
+				char titleBuf[64] = "Button";
 				int colorType = 0; // 0 - помаранчевий, 1 - зелений, 2 - синій
+				char codeBuf[256] = "";
 				
-				if (parts.count > 0) {
-					NSString *cleanTitle = [parts[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-					strlcpy(titleBuf, [cleanTitle UTF8String], 64);
-				}
+				strlcpy(titleBuf, [btnName UTF8String], 64);
 				
-				if (parts.count > 1) {
-					NSString *colorStr = [[parts[1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] lowercaseString];
-					if ([colorStr isEqualToString:@"green"]) colorType = 1;
-					else if ([colorStr isEqualToString:@"blue"]) colorType = 2;
-					else colorType = 0;
-				}
+				if ([btnColor isEqualToString:@"green"]) colorType = 1;
+				else if ([btnColor isEqualToString:@"blue"]) colorType = 2;
+				else colorType = 0;
 				
+				strlcpy(codeBuf, [btnCode UTF8String], 256);
+				
+				// Записуємо у структуру
 				strlcpy(g_customElements[g_customElementCount].title, titleBuf, 64);
 				g_customElements[g_customElementCount].type = colorType;
-				g_customElements[g_customElementCount].value = 1;
-				g_customElementCount++;
+				strlcpy(g_customElements[g_customElementCount].actionCode, codeBuf, 256);
 				
+				g_customElementCount++;
 				[self saveSettings];
 			}
 			[self showSettings];
 		}];
 		
 		[promptAlert addAction:createAction];
-		[promptAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+		[promptAlert addAction:[UIAlertAction actionWithTitle:@"Скасувати" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
 			[self showSettings];
 		}]];
 		
@@ -505,13 +521,22 @@ const char *IOS_GetExecDir(void)
 {
 	int index = (int)sender.tag;
 	
+	// Зчитуємо закладений код із структури
+	NSString *executedCode = [NSString stringWithUTF8String:g_customElements[index].actionCode];
+	
+	NSLog(@"[CUSTOM CODE EXECUTED]: %@", executedCode);
+	
 	UIViewController *presentedController = self.presentedViewController;
 	[presentedController dismissViewControllerAnimated:YES completion:^{
-		UIAlertController *infoAlert = [UIAlertController alertControllerWithTitle:@"Custom Element" message:[NSString stringWithFormat:@"Виконано дію для кнопки: %s", g_customElements[index].title] preferredStyle:UIAlertControllerStyleAlert];
-		[infoAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+		UIAlertController *resultAlert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%s", g_customElements[index].title]
+																			 message:[NSString stringWithFormat:@"Виконується код:\n%@", executedCode]
+																	  preferredStyle:UIAlertControllerStyleAlert];
+		
+		[resultAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
 			[self showSettings];
 		}]];
-		[self presentViewController:infoAlert animated:YES completion:nil];
+		
+		[self presentViewController:resultAlert animated:YES completion:nil];
 	}];
 }
 
