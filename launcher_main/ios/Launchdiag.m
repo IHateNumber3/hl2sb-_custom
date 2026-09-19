@@ -15,9 +15,10 @@ float g_iOSVer;
 bool isdark;
 int g_buttonSize = 45;
 bool g_devMode = false;
+bool g_customUnlocked = false; // Флаг розблокування кастомізації за кодом
 bool g_shouldStart = false;
 
-#define SETTINGS_MAGIC 111
+#define SETTINGS_MAGIC 112 // Оновили магічне число, щоб структура підхопила новий прапорець
 
 typedef struct settings_s
 {
@@ -28,6 +29,7 @@ typedef struct settings_s
 	unsigned int ftpserver;
 	unsigned int devMode;
 	unsigned int buttonSize;
+	unsigned int customUnlocked;
 } settings_t;
 
 const char *IOS_GetDocsDir(void)
@@ -87,12 +89,10 @@ const char *IOS_GetExecDir(void)
 	NSString *customBgPath = [docsDir stringByAppendingPathComponent:@"launcher_bg.png"];
 	UIImage *bgImage = nil;
 	
-	// Спочатку шукаємо користувацький фон
 	if ([[NSFileManager defaultManager] fileExistsAtPath:customBgPath]) {
 		bgImage = [UIImage imageWithContentsOfFile:customBgPath];
 	}
 	
-	// Якщо нема, шукаємо вбудований
 	if (!bgImage) {
 		NSString *bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"png"];
 		if (!bgPath) bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"PNG"];
@@ -167,14 +167,12 @@ const char *IOS_GetExecDir(void)
 	cardView.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
 	[self.view addSubview:cardView];
 	
-	// Arguments label
 	UILabel *argsLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, cardWidth - 30, 20)];
 	argsLabel.text = @"Command-line arguments:";
 	argsLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
 	argsLabel.textColor = [UIColor blackColor];
 	[cardView addSubview:argsLabel];
 	
-	// Arguments TextField
 	argsTextField = [[UITextField alloc] initWithFrame:CGRectMake(15, 32, cardWidth - 30, 36)];
 	argsTextField.placeholder = @"-game hl2sbpp";
 	argsTextField.text = savedArgsText;
@@ -187,7 +185,6 @@ const char *IOS_GetExecDir(void)
 	argsTextField.delegate = self;
 	[cardView addSubview:argsTextField];
 	
-	// Dev Mode suffix block
 	if (g_devMode) {
 		UILabel *suffixLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 75, cardWidth - 30, 20)];
 		suffixLabel.text = @"Library suffix:";
@@ -207,7 +204,6 @@ const char *IOS_GetExecDir(void)
 		[cardView addSubview:suffixTextField];
 	}
 	
-	// Кнопки Exit та Start
 	CGFloat btnWidth = cardWidth / 2;
 	
 	UIButton *exitBtn = [[UIButton alloc] initWithFrame:CGRectMake(0, cardHeight - btnHeight, btnWidth, btnHeight)];
@@ -253,11 +249,13 @@ const char *IOS_GetExecDir(void)
 		savedSuffixText = @(settings.suffix);
 		g_devMode = settings.devMode != 0;
 		g_buttonSize = (settings.buttonSize >= 30 && settings.buttonSize <= 90) ? settings.buttonSize : 45;
+		g_customUnlocked = settings.customUnlocked != 0;
 		fclose(settingsfile);
 	} else {
 		savedArgsText = @"-game hl2sbpp";
 		g_devMode = false;
 		g_buttonSize = 45;
+		g_customUnlocked = false;
 	}
 }
 
@@ -276,6 +274,7 @@ const char *IOS_GetExecDir(void)
 		settings.magic = SETTINGS_MAGIC;
 		settings.devMode = g_devMode ? 1 : 0;
 		settings.buttonSize = g_buttonSize;
+		settings.customUnlocked = g_customUnlocked ? 1 : 0;
 		fwrite(&settings, sizeof(settings), 1, settingsfile);
 		fclose(settingsfile);
 	}
@@ -285,40 +284,76 @@ const char *IOS_GetExecDir(void)
 {
 	UIAlertController *settingsAlert = [UIAlertController alertControllerWithTitle:@"Settings" message:@"\n\n\n\n\n\n" preferredStyle:UIAlertControllerStyleAlert];
 	
+	// Контейнер з підтримкою скролу (UIScrollView), щоб вміст не різався
 	UIViewController *customVC = [[UIViewController alloc] init];
-	customVC.preferredContentSize = CGSizeMake(270, 180);
+	customVC.preferredContentSize = CGSizeMake(270, 200); // Фіксована видима зона вікна
 	
-	// BG: SET button
-	UIButton *bgButton = [[UIButton alloc] initWithFrame:CGRectMake(10, 10, 250, 35)];
-	[bgButton setTitle:@"SET BACKGROUND" forState:UIControlStateNormal];
+	UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, 270, 200)];
+	scrollView.showsVerticalScrollIndicator = YES;
+	[customVC.view addSubview:scrollView];
+	
+	CGFloat currentY = 10;
+	
+	// 1. Кнопка зміни фону (завжди доступна)
+	UIButton *bgButton = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
+	[bgButton setTitle:@"BG: SET" forState:UIControlStateNormal];
 	[bgButton setBackgroundColor:[UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:0.7]];
 	bgButton.layer.cornerRadius = 6;
 	[bgButton.titleLabel setFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
 	[bgButton addTarget:self action:@selector(selectBackground) forControlEvents:UIControlEventTouchUpInside];
-	[customVC.view addSubview:bgButton];
+	[scrollView addSubview:bgButton];
+	currentY += 45;
 	
-	// Developer Mode switch
-	UILabel *devLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 55, 150, 30)];
+	// 2. Якщо кастомізація розблокована — показуємо нову кнопку (або елемент)
+	if (g_customUnlocked) {
+		UIButton *customElementBtn = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
+		[customElementBtn setTitle:@"Custom Element Settings" forState:UIControlStateNormal];
+		[customElementBtn setBackgroundColor:[UIColor colorWithRed:0.8 green:0.4 blue:0.1 alpha:0.8]];
+		customElementBtn.layer.cornerRadius = 6;
+		[customElementBtn.titleLabel setFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
+		[customElementBtn addTarget:self action:@selector(customElementAction) forControlEvents:UIControlEventTouchUpInside];
+		[scrollView addSubview:customElementBtn];
+		currentY += 45;
+	} else {
+		// Кнопка введення секретного коду для розблокування
+		UIButton *unlockBtn = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
+		[unlockBtn setTitle:@"Create new element customisation" forState:UIControlStateNormal];
+		[unlockBtn setBackgroundColor:[UIColor colorWithRed:0.5 green:0.5 blue:0.5 alpha:0.6]];
+		unlockBtn.layer.cornerRadius = 6;
+		[unlockBtn.titleLabel setFont:[UIFont systemFontOfSize:12 weight:UIFontWeightMedium]];
+		[unlockBtn addTarget:self action:@selector(promptForUnlockCode:) forControlEvents:UIControlEventTouchUpInside];
+		[scrollView addSubview:unlockBtn];
+		currentY += 45;
+	}
+	
+	// 3. Developer Mode switch
+	UILabel *devLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, currentY + 5, 150, 20)];
 	devLabel.text = @"Developer Mode";
 	devLabel.font = [UIFont systemFontOfSize:14];
-	[customVC.view addSubview:devLabel];
+	[scrollView addSubview:devLabel];
 	
-	devModeSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(180, 55, 50, 30)];
+	devModeSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(180, currentY, 50, 30)];
 	devModeSwitch.on = g_devMode;
 	[devModeSwitch addTarget:self action:@selector(devModeChanged:) forControlEvents:UIControlEventValueChanged];
-	[customVC.view addSubview:devModeSwitch];
+	[scrollView addSubview:devModeSwitch];
+	currentY += 45;
 	
-	// Button Height slider
-	UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 100, 150, 20)];
+	// 4. Button Height slider
+	UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, currentY, 150, 20)];
 	sliderLabel.text = @"Button Height";
 	sliderLabel.font = [UIFont systemFontOfSize:14];
-	[customVC.view addSubview:sliderLabel];
+	[scrollView addSubview:sliderLabel];
+	currentY += 25;
 	
-	buttonSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(10, 130, 220, 20)];
+	buttonSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(10, currentY, 220, 20)];
 	buttonSizeSlider.minimumValue = 35;
 	buttonSizeSlider.maximumValue = 80;
 	buttonSizeSlider.value = g_buttonSize;
-	[customVC.view addSubview:buttonSizeSlider];
+	[scrollView addSubview:buttonSizeSlider];
+	currentY += 35;
+    
+	// Встановлюємо загальну область прокрутки (contentSize), щоб скролер знав, де кінець
+	scrollView.contentSize = CGSizeMake(270, currentY);
 	
 	[settingsAlert setValue:customVC forKey:@"contentViewController"];
 	
@@ -330,6 +365,61 @@ const char *IOS_GetExecDir(void)
 	
 	[settingsAlert addAction:okAction];
 	[self presentViewController:settingsAlert animated:YES completion:nil];
+}
+
+// Запит секретного коду
+- (void)promptForUnlockCode:(id)sender
+{
+	// Закриваємо поточне вікно налаштувань перед відкриттям іншого алерту
+	UIViewController *presentedController = self.presentedViewController;
+	[presentedController dismissViewControllerAnimated:YES completion:^{
+		
+		UIAlertController *codeAlert = [UIAlertController alertControllerWithTitle:@"Unlock Customisation" message:@"Enter secret code:" preferredStyle:UIAlertControllerStyleAlert];
+		
+		[codeAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+			textField.placeholder = @"Secret code...";
+			textField.secureTextEntry = YES; // Можна приховати символи, якщо хочеш
+		}];
+		
+		UIAlertAction *submitAction = [UIAlertAction actionWithTitle:@"Unlock" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+			UITextField *textField = codeAlert.textFields.firstObject;
+			NSString *enteredCode = textField.text;
+			
+			// ЗАДАЙ СВІЙ СЕКРЕТНИЙ КОД ТУТ (наприклад: "1234" або "shiza")
+			if ([enteredCode isEqualToString:@"shiza"]) {
+				g_customUnlocked = YES;
+				[self saveSettings];
+				
+				// Показуємо сповіщення про успіх
+				UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Success!" message:@"New customisation unlocked!" preferredStyle:UIAlertControllerStyleAlert];
+				[successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+				[self presentViewController:successAlert animated:YES completion:nil];
+			} else {
+				// Помилка коду
+				UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Error" message:@"Wrong code!" preferredStyle:UIAlertControllerStyleAlert];
+				[errorAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+				[self presentViewController:errorAlert animated:YES completion:nil];
+			}
+		}];
+		
+		UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
+		
+		[codeAlert addAction:submitAction];
+		[codeAlert addAction:cancelAction];
+		
+		[self presentViewController:codeAlert animated:YES completion:nil];
+	}];
+}
+
+// Дія для нової розблокованої кнопки кастомізації
+- (void)customElementAction
+{
+	UIViewController *presentedController = self.presentedViewController;
+	[presentedController dismissViewControllerAnimated:YES completion:^{
+		UIAlertController *infoAlert = [UIAlertController alertControllerWithTitle:@"Customisation" message:@"Here you can add your custom element configuration!" preferredStyle:UIAlertControllerStyleAlert];
+		[infoAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+		[self presentViewController:infoAlert animated:YES completion:nil];
+	}];
 }
 
 - (void)selectBackground
