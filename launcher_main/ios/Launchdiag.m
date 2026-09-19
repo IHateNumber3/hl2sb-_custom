@@ -1,5 +1,5 @@
 /*
- Launchdialog.m - iOS launch dialog with dynamic button sizing and transparent UI
+ Launchdialog.m - iOS launch dialog with dynamic button sizing, transparent UI, and background selection
  */
 
 #import <Foundation/Foundation.h>
@@ -13,7 +13,7 @@ char **szArgv;
 char *g_szLibrarySuffix;
 float g_iOSVer;
 bool isdark;
-int g_buttonSize = 45; // Стандартний розмір кнопок
+int g_buttonSize = 45;
 bool g_devMode = false;
 bool g_shouldStart = false;
 
@@ -49,13 +49,14 @@ const char *IOS_GetExecDir(void)
 	return dir;
 }
 
-@interface LaunchDialogViewController : UIViewController <UITextFieldDelegate>
+@interface LaunchDialogViewController : UIViewController <UITextFieldDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 {
 	UITextField *argsTextField;
 	UITextField *suffixTextField;
 	UISwitch *devModeSwitch;
 	UISlider *buttonSizeSlider;
 	UIView *cardView;
+	UIImageView *bgView;
 	
 	NSString *savedArgsText;
 	NSString *savedSuffixText;
@@ -82,12 +83,24 @@ const char *IOS_GetExecDir(void)
 	[self.view addGestureRecognizer:tap];
 	
 	// 1. Фоновій малюнок
-	NSString *bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"png"];
-	if (!bgPath) bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"PNG"];
-	UIImage *bgImage = bgPath ? [UIImage imageWithContentsOfFile:bgPath] : nil;
+	NSString *docsDir = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+	NSString *customBgPath = [docsDir stringByAppendingPathComponent:@"launcher_bg.png"];
+	UIImage *bgImage = nil;
+	
+	// Спочатку шукаємо користувацький фон
+	if ([[NSFileManager defaultManager] fileExistsAtPath:customBgPath]) {
+		bgImage = [UIImage imageWithContentsOfFile:customBgPath];
+	}
+	
+	// Якщо нема, шукаємо вбудований
+	if (!bgImage) {
+		NSString *bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"png"];
+		if (!bgPath) bgPath = [[NSBundle mainBundle] pathForResource:@"launcher_bg" ofType:@"PNG"];
+		bgImage = bgPath ? [UIImage imageWithContentsOfFile:bgPath] : nil;
+	}
 	
 	if (bgImage) {
-		UIImageView *bgView = [[UIImageView alloc] initWithImage:bgImage];
+		bgView = [[UIImageView alloc] initWithImage:bgImage];
 		bgView.frame = self.view.bounds;
 		bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 		bgView.contentMode = UIViewContentModeScaleAspectFill;
@@ -135,7 +148,6 @@ const char *IOS_GetExecDir(void)
 
 - (void)rebuildCardView
 {
-	// Зберігаємо поточний введений текст перед перебудовою
 	if (argsTextField) savedArgsText = argsTextField.text;
 	if (suffixTextField) savedSuffixText = suffixTextField.text;
 	
@@ -144,7 +156,7 @@ const char *IOS_GetExecDir(void)
 	}
 	
 	CGFloat cardWidth = 340;
-	CGFloat btnHeight = g_buttonSize; // Використовуємо g_buttonSize зі слайдера!
+	CGFloat btnHeight = g_buttonSize;
 	CGFloat contentHeight = g_devMode ? 145 : 80;
 	CGFloat cardHeight = contentHeight + btnHeight;
 	
@@ -271,31 +283,40 @@ const char *IOS_GetExecDir(void)
 
 - (void)showSettings
 {
-	UIAlertController *settingsAlert = [UIAlertController alertControllerWithTitle:@"Settings" message:@"\n\n\n\n\n" preferredStyle:UIAlertControllerStyleAlert];
+	UIAlertController *settingsAlert = [UIAlertController alertControllerWithTitle:@"Settings" message:@"\n\n\n\n\n\n" preferredStyle:UIAlertControllerStyleAlert];
 	
 	UIViewController *customVC = [[UIViewController alloc] init];
-	customVC.preferredContentSize = CGSizeMake(270, 120);
+	customVC.preferredContentSize = CGSizeMake(270, 180);
+	
+	// BG: SET button
+	UIButton *bgButton = [[UIButton alloc] initWithFrame:CGRectMake(10, 10, 250, 35)];
+	[bgButton setTitle:@"BG: SET" forState:UIControlStateNormal];
+	[bgButton setBackgroundColor:[UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:0.7]];
+	bgButton.layer.cornerRadius = 6;
+	[bgButton.titleLabel setFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
+	[bgButton addTarget:self action:@selector(selectBackground) forControlEvents:UIControlEventTouchUpInside];
+	[customVC.view addSubview:bgButton];
 	
 	// Developer Mode switch
-	UILabel *devLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 10, 150, 30)];
+	UILabel *devLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 55, 150, 30)];
 	devLabel.text = @"Developer Mode";
 	devLabel.font = [UIFont systemFontOfSize:14];
 	[customVC.view addSubview:devLabel];
 	
-	devModeSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(180, 10, 50, 30)];
+	devModeSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(180, 55, 50, 30)];
 	devModeSwitch.on = g_devMode;
 	[devModeSwitch addTarget:self action:@selector(devModeChanged:) forControlEvents:UIControlEventValueChanged];
 	[customVC.view addSubview:devModeSwitch];
 	
-	// Button Size slider
-	UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 50, 150, 20)];
+	// Button Height slider
+	UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 100, 150, 20)];
 	sliderLabel.text = @"Button Height";
 	sliderLabel.font = [UIFont systemFontOfSize:14];
 	[customVC.view addSubview:sliderLabel];
 	
-	buttonSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(10, 75, 220, 20)];
-	buttonSizeSlider.minimumValue = 35; // Мінімальна висота кнопок
-	buttonSizeSlider.maximumValue = 80; // Максимальна висота кнопок
+	buttonSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(10, 130, 220, 20)];
+	buttonSizeSlider.minimumValue = 35;
+	buttonSizeSlider.maximumValue = 80;
 	buttonSizeSlider.value = g_buttonSize;
 	[customVC.view addSubview:buttonSizeSlider];
 	
@@ -304,11 +325,39 @@ const char *IOS_GetExecDir(void)
 	UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"Done" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
 		g_buttonSize = (int)buttonSizeSlider.value;
 		[self saveSettings];
-		[self rebuildCardView]; // ПЕРЕБУДОВУЄМО КАРТКУ ТА КНОПКИ З НОВИМ РОЗМІРОМ
+		[self rebuildCardView];
 	}];
 	
 	[settingsAlert addAction:okAction];
 	[self presentViewController:settingsAlert animated:YES completion:nil];
+}
+
+- (void)selectBackground
+{
+	UIImagePickerController *picker = [[UIImagePickerController alloc] init];
+	picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
+	picker.delegate = self;
+	[self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
+{
+	UIImage *image = [info objectForKey:UIImagePickerControllerOriginalImage];
+	
+	NSString *docsDir = [NSString stringWithUTF8String:IOS_GetDocsDir()];
+	NSString *imagePath = [docsDir stringByAppendingPathComponent:@"launcher_bg.png"];
+	
+	NSData *imageData = UIImagePNGRepresentation(image);
+	[imageData writeToFile:imagePath atomically:YES];
+	
+	[self dismissViewControllerAnimated:YES completion:^{
+		bgView.image = image;
+	}];
+}
+
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
+{
+	[self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)devModeChanged:(UISwitch *)sender
