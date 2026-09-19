@@ -15,21 +15,21 @@ float g_iOSVer;
 bool isdark;
 int g_buttonSize = 45;
 bool g_devMode = false;
-bool g_customUnlocked = false; // Прапорець розблокування кастомізації
+bool g_customUnlocked = false;
 bool g_shouldStart = false;
 
 // Структура для кастомного елемента
 typedef struct custom_element_s
 {
 	char title[64];
-	int type; // 0 - кнопка, 1 - світчер
+	int type; // 0 - помаранчевий, 1 - зелений, 2 - синій
 	int value;
 } custom_element_t;
 
 int g_customElementCount = 0;
 custom_element_t g_customElements[10];
 
-#define SETTINGS_MAGIC 113 // Оновлене магічне число для нової структури з кастомними елементами
+#define SETTINGS_MAGIC 113
 
 typedef struct settings_s
 {
@@ -92,12 +92,11 @@ const char *IOS_GetExecDir(void)
 	
 	[self loadSettings];
 	
-	// Закриття клавіатури за тапом
 	UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
 	tap.cancelsTouchesInView = NO;
 	[self.view addGestureRecognizer:tap];
 	
-	// 1. Фоновій малюнок
+	// Фоновій малюнок
 	NSString *docsDir = [NSString stringWithUTF8String:IOS_GetDocsDir()];
 	NSString *customBgPath = [docsDir stringByAppendingPathComponent:@"launcher_bg.png"];
 	UIImage *bgImage = nil;
@@ -123,7 +122,6 @@ const char *IOS_GetExecDir(void)
 		self.view.backgroundColor = [UIColor colorWithRed:0.15 green:0.15 blue:0.15 alpha:1.0];
 	}
 	
-	// 2. Лого + Назва додатка
 	CGFloat currentX = 15.0;
 	NSString *logoPath = [[NSBundle mainBundle] pathForResource:@"logo" ofType:@"png"];
 	if (!logoPath) logoPath = [[NSBundle mainBundle] pathForResource:@"logo" ofType:@"PNG"];
@@ -148,14 +146,12 @@ const char *IOS_GetExecDir(void)
 	titleLabel.font = customFont;
 	[self.view addSubview:titleLabel];
 
-	// Кнопка налаштувань
 	UIButton *settingsBtn = [[UIButton alloc] initWithFrame:CGRectMake(self.view.bounds.size.width - 50, 15, 40, 40)];
 	[settingsBtn setTitle:@"⚙" forState:UIControlStateNormal];
 	[settingsBtn.titleLabel setFont:[UIFont systemFontOfSize:26]];
 	[settingsBtn addTarget:self action:@selector(showSettings) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:settingsBtn];
 	
-	// 3. Побудова картки з кнопками
 	[self rebuildCardView];
 }
 
@@ -329,13 +325,23 @@ const char *IOS_GetExecDir(void)
 	[scrollView addSubview:bgButton];
 	currentY += 45;
 	
-	// 2. Блок кастомізації (якщо розблоковано) або кнопка введення коду
+	// 2. Кастомні елементи або розблокування
 	if (g_customUnlocked) {
 		for (int i = 0; i < g_customElementCount; i++) {
 			UIButton *elemBtn = [[UIButton alloc] initWithFrame:CGRectMake(10, currentY, 250, 35)];
 			NSString *btnTitle = [NSString stringWithUTF8String:g_customElements[i].title];
 			[elemBtn setTitle:btnTitle forState:UIControlStateNormal];
-			[elemBtn setBackgroundColor:[UIColor colorWithRed:0.8 green:0.4 blue:0.1 alpha:0.8]];
+			
+			UIColor *btnColor;
+			if (g_customElements[i].type == 1) {
+				btnColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.3 alpha:0.8]; // Зелений
+			} else if (g_customElements[i].type == 2) {
+				btnColor = [UIColor colorWithRed:0.2 green:0.5 blue:0.9 alpha:0.8]; // Синій
+			} else {
+				btnColor = [UIColor colorWithRed:0.8 green:0.4 blue:0.1 alpha:0.8]; // Помаранчевий
+			}
+			
+			[elemBtn setBackgroundColor:btnColor];
 			elemBtn.layer.cornerRadius = 6;
 			[elemBtn.titleLabel setFont:[UIFont systemFontOfSize:14 weight:UIFontWeightMedium]];
 			elemBtn.tag = i;
@@ -448,18 +454,37 @@ const char *IOS_GetExecDir(void)
 	UIViewController *presentedController = self.presentedViewController;
 	[presentedController dismissViewControllerAnimated:YES completion:^{
 		
-		UIAlertController *promptAlert = [UIAlertController alertControllerWithTitle:@"New Custom Element" message:@"Enter element name:" preferredStyle:UIAlertControllerStyleAlert];
+		UIAlertController *promptAlert = [UIAlertController alertControllerWithTitle:@"Custom Code Element" message:@"Введи код, напр.: SuperMod | green" preferredStyle:UIAlertControllerStyleAlert];
 		
 		[promptAlert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-			textField.placeholder = @"Element Name...";
+			textField.placeholder = @"Назва | green (або blue)";
 		}];
 		
-		UIAlertAction *createAction = [UIAlertAction actionWithTitle:@"Create" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+		UIAlertAction *createAction = [UIAlertAction actionWithTitle:@"Compile" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
 			UITextField *textField = promptAlert.textFields.firstObject;
-			if (textField.text.length > 0 && g_customElementCount < 10) {
-				strlcpy(g_customElements[g_customElementCount].title, [textField.text UTF8String], 64);
-				g_customElements[g_customElementCount].type = 0;
-				g_customElements[g_customElementCount].value = 0;
+			NSString *inputCode = textField.text;
+			
+			if (inputCode.length > 0 && g_customElementCount < 10) {
+				NSArray *parts = [inputCode componentsSeparatedByString:@"|"];
+				
+				char titleBuf[64] = "Custom Button";
+				int colorType = 0; // 0 - помаранчевий, 1 - зелений, 2 - синій
+				
+				if (parts.count > 0) {
+					NSString *cleanTitle = [parts[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+					strlcpy(titleBuf, [cleanTitle UTF8String], 64);
+				}
+				
+				if (parts.count > 1) {
+					NSString *colorStr = [[parts[1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] lowercaseString];
+					if ([colorStr isEqualToString:@"green"]) colorType = 1;
+					else if ([colorStr isEqualToString:@"blue"]) colorType = 2;
+					else colorType = 0;
+				}
+				
+				strlcpy(g_customElements[g_customElementCount].title, titleBuf, 64);
+				g_customElements[g_customElementCount].type = colorType;
+				g_customElements[g_customElementCount].value = 1;
 				g_customElementCount++;
 				
 				[self saveSettings];
@@ -482,7 +507,7 @@ const char *IOS_GetExecDir(void)
 	
 	UIViewController *presentedController = self.presentedViewController;
 	[presentedController dismissViewControllerAnimated:YES completion:^{
-		UIAlertController *infoAlert = [UIAlertController alertControllerWithTitle:@"Custom Element" message:[NSString stringWithFormat:@"You clicked: %s", g_customElements[index].title] preferredStyle:UIAlertControllerStyleAlert];
+		UIAlertController *infoAlert = [UIAlertController alertControllerWithTitle:@"Custom Element" message:[NSString stringWithFormat:@"Виконано дію для кнопки: %s", g_customElements[index].title] preferredStyle:UIAlertControllerStyleAlert];
 		[infoAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
 			[self showSettings];
 		}]];
