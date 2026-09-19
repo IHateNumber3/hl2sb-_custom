@@ -337,7 +337,13 @@ const char *IOS_GetExecDir(void)
 	UIImagePickerController *picker = [[UIImagePickerController alloc] init];
 	picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
 	picker.delegate = self;
-	[self presentViewController:picker animated:YES completion:nil];
+	
+	UIViewController *presentedController = self.presentedViewController;
+	if (presentedController) {
+		[presentedController presentViewController:picker animated:YES completion:nil];
+	} else {
+		[self presentViewController:picker animated:YES completion:nil];
+	}
 }
 
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info
@@ -350,14 +356,25 @@ const char *IOS_GetExecDir(void)
 	NSData *imageData = UIImagePNGRepresentation(image);
 	[imageData writeToFile:imagePath atomically:YES];
 	
-	[self dismissViewControllerAnimated:YES completion:^{
-		bgView.image = image;
+	[picker dismissViewControllerAnimated:YES completion:^{
+		[self dismissViewControllerAnimated:YES completion:^{
+			if (image && bgView) {
+				bgView.image = image;
+			} else if (image) {
+				bgView = [[UIImageView alloc] initWithImage:image];
+				bgView.frame = self.view.bounds;
+				bgView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+				bgView.contentMode = UIViewContentModeScaleAspectFill;
+				bgView.clipsToBounds = YES;
+				[self.view insertSubview:bgView atIndex:0];
+			}
+		}];
 	}];
 }
 
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
 {
-	[self dismissViewControllerAnimated:YES completion:nil];
+	[picker dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)devModeChanged:(UISwitch *)sender
